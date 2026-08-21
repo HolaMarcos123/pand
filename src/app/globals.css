@@ -1,0 +1,143 @@
+/* Google Fonts: Manrope (500,600,700,800) + JetBrains Mono (400,500).
+   El @import debe ir primero: es un requisito de la spec de CSS. */
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── Los 7 tokens de Pand (hex, para uso directo) ────────── */
+    --pand-celeste: #7be1ff;
+    --pand-azul: #006aff;
+    --pand-contorno: #2a2a35;
+    --pand-gris: #6e6e78;
+    --pand-coral: #f4707c;
+    --pand-bg: #f6f8fb;
+    --pand-border: #e6e9ee;
+
+    /* ── Tokens semanticos de shadcn/ui ───────────────────────
+       En triplete HSL sin funcion, porque tailwind.config.ts los
+       consume como hsl(var(--token)). */
+    --background: 216 38% 97%; /* pand.bg       #F6F8FB */
+    --foreground: 240 12% 19%; /* pand.contorno #2A2A35 */
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 12% 19%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 12% 19%;
+
+    --primary: 215 100% 50%; /* pand.azul     #006AFF */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 218 19% 95%;
+    --secondary-foreground: 240 12% 19%;
+
+    --muted: 218 19% 95%;
+    --muted-foreground: 240 4% 45%; /* pand.gris  #6E6E78 */
+
+    --accent: 194 100% 95%; /* celeste al 95% de luz */
+    --accent-foreground: 240 12% 19%;
+
+    --destructive: 355 86% 70%; /* pand.coral    #F4707C */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 218 19% 92%; /* pand.border   #E6E9EE */
+    --input: 218 19% 92%;
+    --ring: 215 100% 50%;
+
+    /* Series de graficos (recharts) */
+    --chart-1: 215 100% 50%; /* azul    */
+    --chart-2: 194 100% 74%; /* celeste */
+    --chart-3: 355 86% 70%; /* coral   */
+    --chart-4: 240 4% 45%; /* gris    */
+    --chart-5: 215 60% 70%; /* azul suave */
+
+    /* Sidebar */
+    --sidebar: 0 0% 100%;
+    --sidebar-foreground: 240 12% 19%;
+    --sidebar-primary: 215 100% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 194 100% 95%;
+    --sidebar-accent-foreground: 240 12% 19%;
+    --sidebar-border: 218 19% 92%;
+    --sidebar-ring: 215 100% 50%;
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 240 12% 12%;
+    --foreground: 216 38% 97%;
+
+    --card: 240 12% 16%;
+    --card-foreground: 216 38% 97%;
+
+    --popover: 240 12% 16%;
+    --popover-foreground: 216 38% 97%;
+
+    --primary: 215 100% 60%;
+    --primary-foreground: 240 12% 12%;
+
+    --secondary: 240 8% 22%;
+    --secondary-foreground: 216 38% 97%;
+
+    --muted: 240 8% 22%;
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 194 60% 28%;
+    --accent-foreground: 216 38% 97%;
+
+    --destructive: 355 86% 65%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 8% 24%;
+    --input: 240 8% 24%;
+    --ring: 215 100% 60%;
+
+    --chart-1: 215 100% 60%;
+    --chart-2: 194 100% 74%;
+    --chart-3: 355 86% 70%;
+    --chart-4: 240 5% 65%;
+    --chart-5: 215 60% 70%;
+
+    --sidebar: 240 12% 16%;
+    --sidebar-foreground: 216 38% 97%;
+    --sidebar-primary: 215 100% 60%;
+    --sidebar-primary-foreground: 240 12% 12%;
+    --sidebar-accent: 194 60% 28%;
+    --sidebar-accent-foreground: 216 38% 97%;
+    --sidebar-border: 240 8% 24%;
+    --sidebar-ring: 215 100% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    background-color: var(--pand-bg);
+    color: var(--pand-contorno);
+    font-family: "Manrope", sans-serif;
+    font-weight: 500;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer utilities {
+  /* Cifras: importes, IDs, fechas. Tabular para que las columnas alineen. */
+  .mono {
+    font-family: "JetBrains Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}
