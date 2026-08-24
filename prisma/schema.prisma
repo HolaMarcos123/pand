@@ -1,7 +1,12 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
+// Pand — Software de cobranzas SaaS multi-tenant
+// Schema del paso P01 del prompt maestro v3.
+//
+// Convenciones:
+//   · Campos en camelCase en el cliente, columnas snake_case en la DB (@map).
+//     Las policies de RLS y el SQL crudo hablan snake_case, como en el brief.
+//   · Todos los enums en UPPER_SNAKE (el brief mezclaba mayusculas y minusculas).
+//   · Toda tabla de negocio lleva organizationId: es la llave del aislamiento
+//     multi-tenant y la columna sobre la que corre RLS.
 
 generator client {
   provider = "prisma-client"
@@ -10,4 +15,347 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+// ─────────────────────────── Enums ───────────────────────────
+
+enum Sector {
+  FINANCIAL
+  B2B
+  TELECOM
+  RETAIL
+}
+
+enum Plan {
+  STARTER
+  GROWTH
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum Role {
+  ADMIN
+  SUPERVISOR
+  OPERATOR
+}
+
+enum PortfolioSource {
+  EXCEL
+  API
+  ERP
+  WEBHOOK
+  MANUAL
+}
+
+enum PortfolioStatus {
+  UPLOADING
+  PROCESSING
+  ACTIVE
+  CLOSED
+}
+
+enum ClientPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ClientStatus {
+  PENDING
+  IN_PROGRESS
+  PROMISE
+  PAID
+  DISPUTE
+  LEGAL
+  LOST
+}
+
+enum InvoiceStatus {
+  PENDING
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
+enum ActionType {
+  CALL
+  EMAIL
+  WHATSAPP
+  VISIT
+  SMS
+  NOTE
+  PROMISE
+  AI_CALL
+}
+
+enum ActionResult {
+  NO_ANSWER
+  BUSY
+  PROMISE_PAY
+  REFUSED
+  PAID
+  CALLBACK
+  WRONG_NUMBER
+}
+
+// El brief no enumera los medios de pago: estos son un supuesto.
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CARD
+  CHECK
+  DEPOSIT
+  OTHER
+}
+
+// Derivado de los tres tipos de integracion que describe el paso P06.
+enum IntegrationType {
+  REST_API
+  WEBHOOK
+  SFTP
+}
+
+enum IntegrationAuthType {
+  NONE
+  API_KEY
+  BEARER
+  BASIC
+}
+
+// ─────────────────────────── Modelos ───────────────────────────
+
+model Organization {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String    @unique
+  sector      Sector
+  plan        Plan      @default(STARTER)
+  settings    Json      @default("{}")
+  billingId   String?   @map("billing_id")
+  seatsUsed   Int       @default(0) @map("seats_used")
+  seatsMax    Int       @default(3) @map("seats_max")
+  trialEnds   DateTime? @map("trial_ends") @db.Timestamptz(6)
+  // No esta en la lista del P01, pero el wizard del P02 lo necesita.
+  isOnboarded Boolean   @default(false) @map("is_onboarded")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  users              User[]
+  portfolios         Portfolio[]
+  clients            Client[]
+  invoices           Invoice[]
+  managementActions  ManagementAction[]
+  payments           Payment[]
+  integrationConfigs IntegrationConfig[]
+  aiConversations    AiConversation[]
+
+  @@map("organizations")
+}
+
+model User {
+  // Sin @default: el id es el UID que emite Supabase Auth.
+  id             String    @id @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  email          String
+  fullName       String    @map("full_name")
+  role           Role      @default(OPERATOR)
+  isActive       Boolean   @default(true) @map("is_active")
+  avatarUrl      String?   @map("avatar_url")
+  lastLoginAt    DateTime? @map("last_login_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadedPortfolios Portfolio[]        @relation("PortfolioUploader")
+  assignedClients    Client[]           @relation("ClientAssignee")
+  managementActions  ManagementAction[] @relation("ActionOperator")
+  registeredPayments Payment[]          @relation("PaymentRegistrar")
+  aiConversations    AiConversation[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Portfolio {
+  id             String          @id @default(uuid()) @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  name           String
+  source         PortfolioSource @default(EXCEL)
+  sectorType     Sector?         @map("sector_type")
+  status         PortfolioStatus @default(UPLOADING)
+  columnMapping  Json            @default("{}") @map("column_mapping")
+  totalAmount    Decimal         @default(0) @map("total_amount") @db.Decimal(18, 2)
+  totalClients   Int             @default(0) @map("total_clients")
+  uploadedById   String?         @map("uploaded_by") @db.Uuid
+  fileUrl        String?         @map("file_url")
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadedBy   User?        @relation("PortfolioUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  clients      Client[]
+
+  @@index([organizationId])
+  @@index([organizationId, status])
+  @@map("portfolios")
+}
+
+model Client {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  portfolioId    String?        @map("portfolio_id") @db.Uuid
+  // Llave del sistema de origen: sobre esto se hace el upsert al reimportar.
+  externalId     String?        @map("external_id")
+  name           String
+  documentNumber String?        @map("document_number")
+  email          String?
+  phone          String?
+  phoneAlt       String?        @map("phone_alt")
+  totalDebt      Decimal        @default(0) @map("total_debt") @db.Decimal(18, 2)
+  currency       String         @default("PYG")
+  riskScore      Int?           @map("risk_score")
+  priority       ClientPriority @default(MEDIUM)
+  assignedToId   String?        @map("assigned_to") @db.Uuid
+  nextActionAt   DateTime?      @map("next_action_at") @db.Timestamptz(6)
+  status         ClientStatus   @default(PENDING)
+  tags           String[]       @default([])
+  metadata       Json           @default("{}")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  portfolio         Portfolio?         @relation(fields: [portfolioId], references: [id], onDelete: SetNull)
+  assignedTo        User?              @relation("ClientAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  invoices          Invoice[]
+  managementActions ManagementAction[]
+  payments          Payment[]
+
+  // Evita duplicar deudores al reimportar la misma cartera.
+  @@unique([organizationId, externalId])
+  @@index([organizationId])
+  @@index([assignedToId])
+  @@index([nextActionAt])
+  @@index([status, priority])
+  @@index([organizationId, portfolioId])
+  @@map("clients")
+}
+
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  clientId       String        @map("client_id") @db.Uuid
+  invoiceNumber  String        @map("invoice_number")
+  description    String?
+  amount         Decimal       @db.Decimal(18, 2)
+  currency       String        @default("PYG")
+  dueDate        DateTime      @map("due_date") @db.Date
+  // Denormalizado a proposito: lo recalcula un cron diario (pg_cron).
+  daysOverdue    Int           @default(0) @map("days_overdue")
+  status         InvoiceStatus @default(PENDING)
+  paidAmount     Decimal       @default(0) @map("paid_amount") @db.Decimal(18, 2)
+  metadata       Json          @default("{}")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  payments     Payment[]
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([dueDate])
+  @@index([organizationId, status])
+  @@map("invoices")
+}
+
+model ManagementAction {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  clientId       String        @map("client_id") @db.Uuid
+  operatorId     String?       @map("operator_id") @db.Uuid
+  actionType     ActionType    @map("action_type")
+  result         ActionResult?
+  comment        String?
+  nextActionAt   DateTime?     @map("next_action_at") @db.Timestamptz(6)
+  promiseAmount  Decimal?      @map("promise_amount") @db.Decimal(18, 2)
+  promiseDate    DateTime?     @map("promise_date") @db.Date
+  recordingUrl   String?       @map("recording_url")
+  aiSummary      String?       @map("ai_summary")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  operator     User?        @relation("ActionOperator", fields: [operatorId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([clientId, createdAt])
+  @@index([operatorId, createdAt])
+  @@map("management_actions")
+}
+
+model Payment {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  clientId       String        @map("client_id") @db.Uuid
+  invoiceId      String?       @map("invoice_id") @db.Uuid
+  amount         Decimal       @db.Decimal(18, 2)
+  currency       String        @default("PYG")
+  paymentDate    DateTime      @map("payment_date") @db.Date
+  paymentMethod  PaymentMethod @map("payment_method")
+  reference      String?
+  registeredById String?       @map("registered_by") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  invoice      Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  registeredBy User?        @relation("PaymentRegistrar", fields: [registeredById], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([organizationId, paymentDate])
+  @@map("payments")
+}
+
+model IntegrationConfig {
+  id             String              @id @default(uuid()) @db.Uuid
+  organizationId String              @map("organization_id") @db.Uuid
+  name           String
+  type           IntegrationType
+  endpointUrl    String?             @map("endpoint_url")
+  // Se guarda encriptada con pgcrypto, nunca en texto plano.
+  apiKey         String?             @map("api_key")
+  authType       IntegrationAuthType @default(NONE) @map("auth_type")
+  columnMapping  Json                @default("{}") @map("column_mapping")
+  syncSchedule   String?             @map("sync_schedule")
+  isActive       Boolean             @default(true) @map("is_active")
+  webhookToken   String              @unique @map("webhook_token")
+  lastSyncAt     DateTime?           @map("last_sync_at") @db.Timestamptz(6)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("integration_configs")
+}
+
+model AiConversation {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  userId          String?  @map("user_id") @db.Uuid
+  messages        Json     @default("[]")
+  contextSnapshot Json     @default("{}") @map("context_snapshot")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([userId, createdAt])
+  @@map("ai_conversations")
 }
