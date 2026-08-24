@@ -26,6 +26,74 @@ npm run dev
 
 Abre en http://localhost:3000.
 
+## Base de datos
+
+Supabase — proyecto `Pand`, ref `dmyuyxqhbwvifzdhmgeg`, región sa-east-1. El schema
+vive en `prisma/schema.prisma` y las migraciones en `prisma/migrations/`.
+
+Hay dos conexiones y cada una tiene su rol:
+
+| Variable | Puerto | Quién la usa |
+| -------------- | ---- | ------------------------------------------------ |
+| `DATABASE_URL` | 6543 | La app en runtime, vía driver adapter (pooling)  |
+| `DIRECT_URL`   | 5432 | El CLI de Prisma: migrate, db execute, studio    |
+
+`prisma migrate` **se cuelga** si va por el pooler de transacción: autentica, corre su
+primera query y queda esperando sin devolver error. Por eso `prisma.config.ts` apunta
+a `DIRECT_URL`. Ojo: `datasource.directUrl` aparece en la documentación de Prisma 7
+pero no existe en los tipos de 7.9.1 — ponerlo ahí se ignora en silencio.
+
+Prisma 7 no trae engine nativo: la conexión va por `@prisma/adapter-pg`. Ver
+`src/lib/prisma.ts`.
+
+### Aislamiento multi-tenant
+
+RLS activo en las 10 tablas, una policy por tabla. El tenant se resuelve con
+`public.current_org_id()`, un subquery contra `users` por `auth.uid()` — no con un
+claim del JWT, así que no hay hook que configurar ni token que se desincronice.
+
+**RLS no cubre a Prisma.** El rol `postgres` tiene `BYPASSRLS`, así que las policies
+protegen el camino de supabase-js (la anon key viaja al browser), no el de Prisma.
+Toda query de Prisma tiene que filtrar por `organizationId` explícitamente.
+
+### Automatismos
+
+- **Trigger** `management_actions_sync_next_action`: al insertar una gestión con
+  `next_action_at`, lo propaga a `clients.next_action_at`. Solo en INSERT — las
+  gestiones son historial, no se editan.
+- **Cron** `pand-refresh-overdue` (pg_cron, 03:15 UTC ≈ 00:15 en Paraguay): recalcula
+  `invoices.days_overdue` sobre facturas abiertas y deriva `clients.priority`.
+  Corre antes de los recordatorios de las 7:00 del P09.
+- `calc_client_priority(dias, deuda, umbral)`: CRITICAL +90 · HIGH 61-90 · MEDIUM
+  31-60 · LOW menos. La deuda escala un nivel si supera
+  `organizations.settings->>'priority_debt_threshold'`; si el tenant no lo configura,
+  solo pesa la mora.
+
+El recálculo **no toca `clients.total_debt`**: ese valor lo mantienen el importador de
+carteras y el flujo de cobros.
+
+## Auth y multi-tenancy
+
+- `src/middleware.ts` — refresca la sesión y **cierra todo por defecto**: se enumera
+  lo público (`/`, `/login`, `/register`, `/pricing`, `/demo`, `/api/webhooks/*`) y
+  el resto exige sesión. El brief pedía proteger `/dashboard/*`, pero los route
+  groups de Next no agregan segmento a la URL, así que un matcher sobre `/dashboard`
+  no protegería nada.
+- `getSession()` en `src/lib/auth/session.ts` cruza el usuario de Supabase Auth con
+  su fila en `users` y su organización. Va envuelto en `cache` de React: una sola
+  consulta por request sin importar cuántos componentes la pidan.
+- `useAuth()` expone `{ user, organization, role, plan, sector, isLoading, signOut }`.
+  Los datos bajan del layout servidor, así que el cliente nunca parpadea.
+- El onboarding vive en el route group `(onboarding)`, fuera de `(dashboard)`: ese
+  layout redirige a `/onboarding` cuando falta completarlo, y si el wizard colgara
+  de ahí se redirigiría a sí mismo.
+
+### Formularios
+
+Los que disparan server actions usan `<NativeSelect>`, no el Select de Radix: Radix
+renderiza su input oculto vacío en el SSR y lo puebla al hidratar, así que el valor
+puede viajar nulo. El de Radix queda para filtros y menús fuera de formularios.
+
 ## Design system
 
 Los 7 tokens de marca viven en `tailwind.config.ts` bajo `colors.pand.*`
@@ -62,3 +130,16 @@ lo carga vía dotenv, así que el CLI de Prisma y la app leen las mismas variabl
   (`https://cdn.sheetjs.com/`).
 - `npm audit` reporta CVEs que solo se resuelven subiendo a Next 16 y Prisma 6+.
   Ver notas del scaffold.
+
+### Pendiente del P02
+
+- **Rate limit no implementado.** El brief pide 100 req/min por `org_id` con Upstash.
+  No hay cuenta ni credenciales de Upstash todavía, así que el middleware no limita
+  nada. Es lo primero a cerrar antes de exponer la app.
+- **Las invitaciones necesitan `SUPABASE_SERVICE_ROLE_KEY`**, que sigue vacía en
+  `.env.local`. El paso 2 del onboarding falla con un mensaje explícito hasta que se
+  cargue. El resto del flujo —registro, login, onboarding— funciona sin ella.
+- El flujo interactivo (submit de los formularios) no se pudo ejercitar de punta a
+  punta: el browser embebido de este entorno no alcanza `localhost`. Se verificó por
+  HTTP con curl: rutas, redirects del middleware y HTML renderizado.
+
