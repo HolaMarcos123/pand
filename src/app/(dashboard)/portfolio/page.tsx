@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Plus, Upload } from "lucide-react";
+import { Banknote, Plus, Upload } from "lucide-react";
 
 import { PortfolioStatusBadge } from "@/components/portfolio/status-badge";
 import { Button } from "@/components/ui/button";
@@ -54,12 +54,20 @@ export default async function PortfolioPage() {
           </p>
         </div>
 
-        <Button asChild>
-          <Link href="/portfolio/new">
-            <Plus className="mr-2 h-4 w-4" />
-            Nueva cartera
-          </Link>
-        </Button>
+        <div className="flex gap-3">
+          <Button asChild variant="outline">
+            <Link href="/portfolio/payments">
+              <Banknote className="mr-2 h-4 w-4" />
+              Importar cobros
+            </Link>
+          </Button>
+          <Button asChild>
+            <Link href="/portfolio/new">
+              <Plus className="mr-2 h-4 w-4" />
+              Nueva cartera
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {portfolios.length === 0 ? (

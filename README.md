@@ -170,6 +170,38 @@ nueva no lo reinicia.
 El mapeo se guarda en `organization.settings.columnMappings` por sector, así la
 segunda carga del mismo ERP no vuelve a pedirlo.
 
+### Importador de cobros
+
+`/portfolio/payments`. El brief lo despacha en dos lineas (documento + monto + fecha),
+pero un importador de cobros toca plata y tiene tres decisiones que ahi no estan:
+
+**Imputacion FIFO.** Sin comprobante indicado, el cobro baja los vencimientos mas
+viejos primero, que es lo que hace cualquier area de cobranzas: descarga la mora que
+mas pesa en los tramos. Si la fila trae numero de comprobante, ese va primero.
+
+**Deduplicacion por referencia.** Si la fila trae referencia y ya existe un cobro con
+esa referencia en el tenant, se saltea. Es la unica defensa contra subir dos veces la
+misma planilla, que duplicaria la plata cobrada y dejaria facturas pagadas que nadie
+pago. Hay ademas un indice unico `(organization_id, reference)` en la base por si el
+chequeo se escapa; Postgres admite varios NULL, asi que los cobros sin referencia
+igual entran. La pantalla avisa antes de importar si la referencia no esta mapeada.
+
+**Un cobro sin deuda abierta igual se registra.** La plata entro: perderla porque no
+habia contra que imputarla seria peor que registrarla y avisar. Aparece en el resumen
+como "sin imputar".
+
+Aritmetica con `Prisma.Decimal`, no con floats. El match por documento **falla si hay
+mas de un deudor con ese documento** en vez de adivinar: el schema no lo declara unico
+y adivinar arriesga imputarle el cobro al deudor equivocado.
+
+### Encabezados: los conectores importan
+
+`normalize-header.ts` saca "de", "del", "la"... **antes** de borrar los separadores,
+que es el unico momento en que se sabe donde termina una palabra. Sin eso
+"Forma de Pago" queda como `formadepago` y no matchea contra `formapago`. Fue un bug
+real: todos los medios de pago entraban como OTHER, y "Fecha de Vencimiento" tampoco
+matcheaba en el importador de cartera.
+
 ## Design system
 
 Los 7 tokens de marca viven en `tailwind.config.ts` bajo `colors.pand.*`
@@ -226,7 +258,6 @@ bien para archivos de decenas de miles de filas pero ocupa la pestaña mientras 
 Para carteras muy grandes o cargas desatendidas hace falta la cola. El seam ya está:
 `importBatch` es idempotente por lote, así que un worker puede llamarla igual.
 
-- Falta el importador de **cobros** (mismo asistente, matcheando por documento).
 - `GET /api/portfolio/:id/progress` con Supabase Realtime no existe: el progreso hoy
   lo lleva el cliente, que es quien manda los lotes.
 

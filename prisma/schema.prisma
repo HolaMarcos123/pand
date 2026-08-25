@@ -314,6 +314,10 @@ model Payment {
   invoice      Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
   registeredBy User?        @relation("PaymentRegistrar", fields: [registeredById], references: [id], onDelete: SetNull)
 
+  // Antidoble-cobro. Postgres admite varios NULL en un unique, asi que los cobros
+  // sin referencia siguen entrando: solo se deduplican los que la traen. Es la
+  // unica defensa real contra reimportar la misma planilla de cobros dos veces.
+  @@unique([organizationId, reference])
   @@index([organizationId])
   @@index([clientId])
   @@index([organizationId, paymentDate])

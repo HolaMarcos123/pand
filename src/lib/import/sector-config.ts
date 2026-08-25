@@ -1,3 +1,4 @@
+import { matchHeaders } from "@/lib/import/normalize-header";
 import type { Sector } from "@/generated/prisma/enums";
 
 /** Campos de Pand a los que se puede mapear una columna del archivo. */
@@ -112,41 +113,8 @@ const ALIASES: Record<FieldKey, string[]> = {
   description: ["descripcion", "detalle", "concepto", "observacion", "description"],
 };
 
-function normalize(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-}
-
-/**
- * Devuelve el mapeo sugerido: columna del archivo → campo de Pand.
- *
- * Un campo no se sugiere dos veces: si dos columnas matchean lo mismo, gana la
- * primera y la segunda queda sin asignar para que el usuario decida. Autocompletar
- * las dos y pisar una sería peor que no sugerir nada.
- */
 export function suggestMapping(
   headers: string[],
 ): Partial<Record<FieldKey, string>> {
-  const mapping: Partial<Record<FieldKey, string>> = {};
-  const used = new Set<string>();
-
-  for (const [key, aliases] of Object.entries(ALIASES) as [FieldKey, string[]][]) {
-    const match = headers.find((header) => {
-      if (used.has(header)) return false;
-      const normalized = normalize(header);
-      return aliases.some(
-        (alias) => normalized === alias || normalized.startsWith(alias),
-      );
-    });
-
-    if (match) {
-      mapping[key] = match;
-      used.add(match);
-    }
-  }
-
-  return mapping;
+  return matchHeaders(headers, ALIASES);
 }
