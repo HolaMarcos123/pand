@@ -129,6 +129,47 @@ hay dando vueltas. No existe `useReactTable`: es `useTable({ features, columns, 
 y las capacidades entran por `features`, junto con las fábricas de row models
 (`createSortedRowModel()`, sin argumentos). El core viene por defecto.
 
+## Importación de carteras
+
+El asistente de `/portfolio/new` va en tres pasos: archivo, mapeo de columnas y
+confirmación.
+
+### Dónde se parsea el archivo, y por qué
+
+**En el navegador de quien lo sube, nunca en nuestro servidor.** El archivo de un
+cliente es contenido no confiable; al backend solo le llegan filas ya mapeadas como
+JSON, que se vuelven a validar con zod. La validación del cliente existe para dar
+buenos mensajes, no para confiar: un POST armado a mano no pasa por la pantalla de
+mapeo.
+
+`xlsx` viene del build oficial de SheetJS (`cdn.sheetjs.com`), **no** del registry de
+npm, cuya versión arrastra prototype pollution y ReDoS sin parche. Está pineado en
+package.json como URL. SheetJS y papaparse se cargan con import dinámico: solo bajan
+cuando hay un archivo de ese tipo.
+
+### El parseo de valores es lo delicado
+
+`src/lib/import/parse-values.ts` es donde se corrompe la plata si uno se descuida:
+
+- `1.234.567` son un millón doscientos mil, no uno con doscientos mil. Un separador
+  suelto seguido de 3 dígitos se trata como miles.
+- `04/03/2026` es 4 de marzo. Se prueba dd/mm **antes** que mm/dd; invertirlo
+  desplaza vencimientos un mes sin que nadie lo note.
+- `31/02` se rechaza: JavaScript lo desbordaría a marzo en silencio.
+
+Los números de fila de los errores son los de Excel (encabezado + base 1), para que
+el usuario los encuentre en su archivo.
+
+### Reimportar corrige, no duplica
+
+Deudores y comprobantes se hacen upsert por su llave natural dentro del tenant
+(`external_id` e `invoice_number`). Reimportar la misma planilla actualiza datos y
+deja el estado de gestión intacto: si alguien está trabajando a ese deudor, una carga
+nueva no lo reinicia.
+
+El mapeo se guarda en `organization.settings.columnMappings` por sector, así la
+segunda carga del mismo ERP no vuelve a pedirlo.
+
 ## Design system
 
 Los 7 tokens de marca viven en `tailwind.config.ts` bajo `colors.pand.*`
@@ -160,9 +201,6 @@ lo carga vía dotenv, así que el CLI de Prisma y la app leen las mismas variabl
 
 ## Deuda conocida
 
-- `xlsx` del registry de npm tiene prototype pollution sin fix publicado. Antes
-  de parsear planillas subidas por usuarios, migrar al build oficial de SheetJS
-  (`https://cdn.sheetjs.com/`).
 - `npm audit` reporta CVEs que solo se resuelven subiendo a Next 16 y Prisma 6+.
   Ver notas del scaffold.
 
@@ -177,4 +215,18 @@ lo carga vía dotenv, así que el CLI de Prisma y la app leen las mismas variabl
 - El flujo interactivo (submit de los formularios) no se pudo ejercitar de punta a
   punta: el browser embebido de este entorno no alcanza `localhost`. Se verificó por
   HTTP con curl: rutas, redirects del middleware y HTML renderizado.
+
+### Pendiente del P04
+
+El brief pide subir el archivo a Supabase Storage y procesarlo con un worker de
+BullMQ. No está: `REDIS_URL` sigue vacía y no hay bucket creado. Hoy la importación
+corre por lotes de 500 filas desde el navegador contra server actions, lo que anda
+bien para archivos de decenas de miles de filas pero ocupa la pestaña mientras dura.
+
+Para carteras muy grandes o cargas desatendidas hace falta la cola. El seam ya está:
+`importBatch` es idempotente por lote, así que un worker puede llamarla igual.
+
+- Falta el importador de **cobros** (mismo asistente, matcheando por documento).
+- `GET /api/portfolio/:id/progress` con Supabase Realtime no existe: el progreso hoy
+  lo lleva el cliente, que es quien manda los lotes.
 
