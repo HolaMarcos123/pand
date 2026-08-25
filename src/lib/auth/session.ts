@@ -21,8 +21,18 @@ export type SessionData = {
     plan: Plan;
     trialEnds: Date | null;
     isOnboarded: boolean;
+    /** Sale de settings.currency, que es Json y no garantiza la clave. */
+    currency: string;
   };
 };
+
+function currencyOf(settings: unknown): string {
+  if (settings && typeof settings === "object") {
+    const value = (settings as Record<string, unknown>).currency;
+    if (typeof value === "string") return value;
+  }
+  return "PYG";
+}
 
 /**
  * Sesion completa: el usuario de Supabase Auth cruzado con su fila en `users` y la
@@ -65,6 +75,7 @@ export const getSession = cache(async (): Promise<SessionData | null> => {
       plan: dbUser.organization.plan,
       trialEnds: dbUser.organization.trialEnds,
       isOnboarded: dbUser.organization.isOnboarded,
+      currency: currencyOf(dbUser.organization.settings),
     },
   };
 });

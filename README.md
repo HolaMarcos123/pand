@@ -94,6 +94,41 @@ Los que disparan server actions usan `<NativeSelect>`, no el Select de Radix: Ra
 renderiza su input oculto vacío en el SSR y lo puebla al hidratar, así que el valor
 puede viajar nulo. El de Radix queda para filtros y menús fuera de formularios.
 
+## Dashboard
+
+El shell del producto vive en el route group `(dashboard)`: sidebar de 260px sobre
+`#2A2A35`, header de 64px y área de contenido sobre `#F6F8FB`.
+
+- `src/lib/nav.ts` define qué ve cada rol. Eso controla lo que se **dibuja**, no lo
+  que se puede alcanzar: las rutas se validan del lado del servidor.
+- `src/lib/queries/dashboard.ts` tiene las agregaciones de KPIs, tramos de mora y
+  operadores. Van en SQL crudo por los buckets y las subconsultas correlacionadas.
+  **Todas filtran por `organization_id`**: Prisma corre con BYPASSRLS y las policies
+  no van a atajar un olvido.
+- Montos casteados a `::float8` y conteos a `::int` en SQL. Sin eso node-postgres
+  devuelve los numeric como string y los count como BigInt, que no se serializan
+  hacia un Client Component.
+
+### Autorización: por qué el chequeo va en la página
+
+Next renderiza el layout y la página **en paralelo**. Un layout que devuelve un 403
+en lugar de `{children}` esconde la página, pero la página igual se ejecutó: consultó
+la base y su resultado quedó en el flight payload de RSC que viaja dentro del HTML.
+
+Pasó de verdad en `/admin/users`: un operador veía el 403 y tenía la lista completa
+de usuarios en el código fuente. Por eso **cada página bajo `/admin` valida el rol por
+su cuenta y antes del primer `await` a la base**. El layout es presentación.
+
+Si agregás una pantalla bajo `/admin`, repetí el chequeo. Y verificalo contando
+ocurrencias en el HTML crudo, no mirando la pantalla.
+
+### TanStack Table v9
+
+El proyecto tiene la **v9**, cuya API no es la de la v8 que documenta casi todo lo que
+hay dando vueltas. No existe `useReactTable`: es `useTable({ features, columns, data })`
+y las capacidades entran por `features`, junto con las fábricas de row models
+(`createSortedRowModel()`, sin argumentos). El core viene por defecto.
+
 ## Design system
 
 Los 7 tokens de marca viven en `tailwind.config.ts` bajo `colors.pand.*`

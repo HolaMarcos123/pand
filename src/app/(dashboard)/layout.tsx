@@ -1,14 +1,16 @@
 import { redirect } from "next/navigation";
 
+import { Sidebar } from "@/components/layout/sidebar";
+import { Topbar } from "@/components/layout/topbar";
 import { AuthProvider } from "@/lib/auth/auth-provider";
 import { requireSession } from "@/lib/auth/session";
+import { getTaskCount } from "@/lib/queries/dashboard";
 
 /**
- * Layout de las pantallas con sesion. El sidebar y el header del producto llegan en
- * el P03; por ahora esto resuelve la sesion una sola vez y la baja al arbol.
+ * Shell del producto: sidebar fijo, header y área de contenido.
  *
- * El onboarding vive en su propio route group y no bajo este layout, justamente para
- * que este redirect no se muerda la cola.
+ * El onboarding vive en su propio route group y no acá, para que este redirect no
+ * se muerda la cola.
  */
 export default async function DashboardLayout({
   children,
@@ -21,5 +23,20 @@ export default async function DashboardLayout({
     redirect("/onboarding");
   }
 
-  return <AuthProvider session={session}>{children}</AuthProvider>;
+  const taskCount = await getTaskCount(session.organization.id, session.user.id);
+
+  return (
+    <AuthProvider session={session}>
+      <div className="flex min-h-screen">
+        <Sidebar taskCount={taskCount} />
+
+        {/* min-w-0 para que una tabla ancha scrollee dentro del área y no empuje
+            el layout entero hacia la derecha. */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <Topbar />
+          <main className="flex-1 bg-pand-bg p-6">{children}</main>
+        </div>
+      </div>
+    </AuthProvider>
+  );
 }

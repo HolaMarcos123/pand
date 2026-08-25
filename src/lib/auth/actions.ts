@@ -281,6 +281,7 @@ export async function inviteTeammate(
   ]);
 
   revalidatePath("/onboarding");
+  revalidatePath("/admin/users");
   return { message: `Invitación enviada a ${email}.` };
 }
 
