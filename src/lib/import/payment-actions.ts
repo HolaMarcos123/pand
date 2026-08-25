@@ -7,6 +7,10 @@ import {
   paymentBatchSchema,
   type PaymentRow,
 } from "@/lib/import/validate-payments";
+import {
+  allocateToInvoices,
+  refreshClientBalance,
+} from "@/lib/payments/apply";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
 
@@ -134,51 +138,20 @@ export async function importPaymentBatch(input: {
         }
 
         // ── 3. Imputar ──────────────────────────────────────────
-        const open = await tx.invoice.findMany({
-          where: {
-            organizationId,
-            clientId,
-            status: { in: ["PENDING", "PARTIAL"] },
-          },
-          orderBy: { dueDate: "asc" },
-          select: { id: true, amount: true, paidAmount: true, invoiceNumber: true },
+        // La aritmética vive en lib/payments/apply: es la misma que usa el modal de
+        // cobro de la bandeja, para que un cobro no termine en dos estados distintos
+        // según por dónde haya entrado.
+        const {
+          allocated: appliedAmount,
+          remaining,
+          firstInvoiceId,
+        } = await allocateToInvoices(tx, {
+          organizationId,
+          clientId,
+          amount: row.amount,
+          preferredInvoiceNumbers: row.invoiceNumber ? [row.invoiceNumber] : undefined,
         });
 
-        // Si la fila indica un comprobante, ese va primero; el resto queda FIFO.
-        const ordered = row.invoiceNumber
-          ? [
-              ...open.filter((i) => i.invoiceNumber === row.invoiceNumber),
-              ...open.filter((i) => i.invoiceNumber !== row.invoiceNumber),
-            ]
-          : open;
-
-        let remaining = new Prisma.Decimal(row.amount);
-        let firstInvoiceId: string | null = null;
-
-        for (const invoice of ordered) {
-          if (remaining.lessThanOrEqualTo(0)) break;
-
-          const due = invoice.amount.minus(invoice.paidAmount);
-          if (due.lessThanOrEqualTo(0)) continue;
-
-          const toApply = remaining.lessThan(due) ? remaining : due;
-          const newPaid = invoice.paidAmount.plus(toApply);
-
-          await tx.invoice.update({
-            where: { id: invoice.id },
-            data: {
-              paidAmount: newPaid,
-              status: newPaid.greaterThanOrEqualTo(invoice.amount)
-                ? "PAID"
-                : "PARTIAL",
-            },
-          });
-
-          remaining = remaining.minus(toApply);
-          firstInvoiceId ??= invoice.id;
-        }
-
-        const appliedAmount = new Prisma.Decimal(row.amount).minus(remaining);
         allocated = allocated.plus(appliedAmount);
 
         if (remaining.greaterThan(0)) {
@@ -211,28 +184,7 @@ export async function importPaymentBatch(input: {
         applied += 1;
 
         // ── 5. Dejar al deudor consistente ──────────────────────
-        // total_debt sale de los comprobantes abiertos, y si no queda ninguno el
-        // deudor pasa a PAID y desaparece de la bandeja.
-        await tx.$executeRaw`
-          UPDATE clients c
-             SET total_debt = COALESCE((
-                   SELECT SUM(i.amount - i.paid_amount)
-                     FROM invoices i
-                    WHERE i.client_id = c.id
-                      AND i.status IN ('PENDING', 'PARTIAL')
-                 ), 0),
-                 status = CASE
-                            WHEN NOT EXISTS (
-                              SELECT 1 FROM invoices i
-                               WHERE i.client_id = c.id
-                                 AND i.status IN ('PENDING', 'PARTIAL')
-                            ) THEN 'PAID'::"ClientStatus"
-                            ELSE c.status
-                          END,
-                 updated_at = now()
-           WHERE c.id = ${clientId}::uuid
-             AND c.organization_id = ${organizationId}::uuid
-        `;
+        await refreshClientBalance(tx, organizationId, clientId);
       }
     },
     // El default de Prisma son 5 segundos: un lote de 200 cobros con varias consultas

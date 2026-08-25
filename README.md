@@ -202,6 +202,40 @@ que es el unico momento en que se sabe donde termina una palabra. Sin eso
 real: todos los medios de pago entraban como OTHER, y "Fecha de Vencimiento" tampoco
 matcheaba en el importador de cartera.
 
+## Bandeja de tareas
+
+`/tasks`. Entran los deudores que no esten pagados ni perdidos y cuyo proximo
+seguimiento ya vencio (o que nunca tuvieron uno). Orden: critica → alta → media →
+baja, y dentro de cada tramo la deuda mas grande primero.
+
+**No hace falta ningun cron para que un deudor "vuelva" a la bandeja.** El brief
+propone un job horario que los devuelva, pero la condicion `next_action_at <= now()`
+ya los trae sola en cuanto pasa la hora. Un job que reescribiera filas para lograr lo
+mismo solo agregaria escrituras y una ventana de hasta una hora en la que la bandeja
+miente.
+
+El operador ve solo su cartera; supervisores y admins ven todo, porque son quienes
+reparten la carga. El filtro esta en la query, no en la UI.
+
+### Una sola imputacion de cobros
+
+`src/lib/payments/apply.ts` es la unica aritmetica de "como baja una deuda", y la
+usan las dos entradas de plata: el importador de planillas y el modal de la bandeja.
+Si cada una tuviera la suya, tarde o temprano dejarian el mismo cobro en estados
+distintos y los numeros del dashboard no cerrarian contra la cartera.
+
+### Dos reglas que se validan en el servidor
+
+- **El resultado tiene que corresponder al tipo de gestion.** Un email no puede estar
+  "ocupado". El selector ya lo limita, pero la server action lo vuelve a chequear: sin
+  eso, un POST armado a mano ensucia los reportes de efectividad por canal.
+- **Una promesa necesita monto y fecha.** Sin eso no se le puede hacer seguimiento, y
+  una promesa que no se puede seguir no es una promesa.
+
+`clients.next_action_at` no lo escribe el codigo: lo propaga el trigger del P01.
+Escribirlo tambien desde la action seria una segunda fuente de verdad para el mismo
+dato.
+
 ## Design system
 
 Los 7 tokens de marca viven en `tailwind.config.ts` bajo `colors.pand.*`
