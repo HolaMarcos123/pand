@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { isRegistrationOpen } from "@/lib/auth/registration";
 import { requireRole, requireSession } from "@/lib/auth/session";
 import {
   inviteSchema,
@@ -92,6 +93,12 @@ export async function signUpAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
+  // Esta es la barrera que cuenta. Que la pantalla no muestre el formulario no
+  // impide que alguien invoque la action directamente.
+  if (!isRegistrationOpen()) {
+    return { error: "El registro está cerrado por ahora." };
+  }
+
   const parsed = registerSchema.safeParse({
     companyName: formData.get("companyName"),
     sector: formData.get("sector"),

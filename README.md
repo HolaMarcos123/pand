@@ -236,6 +236,23 @@ distintos y los numeros del dashboard no cerrarian contra la cartera.
 Escribirlo tambien desde la action seria una segunda fuente de verdad para el mismo
 dato.
 
+### Cerrojo del alta publica
+
+`REGISTRATION_OPEN`. Mientras Pand este desplegado en una URL adivinable y sin
+landing, cualquiera que llegue podria crearse una organizacion con 14 dias de trial.
+
+**El default es cerrado y es deliberado:** si la variable no esta definida —entorno
+nuevo, preview, alguien que se olvido— el registro queda cerrado. La alternativa
+(abierto por defecto) significa que un olvido abre el alta en produccion sin que
+nadie se entere.
+
+Solo `REGISTRATION_OPEN=true`, exactamente, la abre. El chequeo que cuenta esta en
+`signUpAction`: esconder el formulario no impide invocar la server action
+directamente. La pantalla y el link del login son presentacion.
+
+`/register` y `/login` se resuelven por request (`force-dynamic`), asi que abrir o
+cerrar el alta es cambiar la variable y redesplegar, sin reconstruir.
+
 ## Design system
 
 Los 7 tokens de marca viven en `tailwind.config.ts` bajo `colors.pand.*`
