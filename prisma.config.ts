@@ -1,5 +1,5 @@
 import { config as loadEnv } from "dotenv";
-import { defineConfig, env } from "prisma/config";
+import { defineConfig } from "prisma/config";
 
 // Unica fuente de verdad para secretos: .env.local (gitignorado).
 // Ojo: `import "dotenv/config"` cargaria .env, no .env.local — de ahi el path explicito.
@@ -23,6 +23,13 @@ export default defineConfig({
     //
     // `directUrl` existe en la documentacion de Prisma 7 pero no en los tipos de
     // 7.9.1: ponerlo ahi no hace nada, se ignora en silencio.
-    url: env("DIRECT_URL"),
+    //
+    // Se lee con process.env y NO con el helper env() de Prisma, a proposito.
+    // env() tira PrismaConfigEnvError si la variable no existe, y eso rompe
+    // `prisma generate` —que solo genera codigo y no toca la base— en cualquier
+    // entorno donde la URL no este definida. Rompio el build de Vercel.
+    // Asi, generate siempre funciona y solo migrate falla si falta la conexion,
+    // que es cuando de verdad hace falta.
+    url: process.env.DIRECT_URL,
   },
 });
