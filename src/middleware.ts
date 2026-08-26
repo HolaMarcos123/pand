@@ -25,6 +25,9 @@ function isPublic(pathname: string) {
   if (PUBLIC_ROUTES.includes(pathname)) return true;
   // Los webhooks entrantes (P06) se autentican con su propio token, no con sesion.
   if (pathname.startsWith("/api/webhooks/")) return true;
+  // El healthcheck tiene que ser publico: sirve justo cuando la base no responde
+  // y por lo tanto no se puede iniciar sesion. No expone valores, solo presencia.
+  if (pathname === "/api/health") return true;
   return false;
 }
 
