@@ -50,16 +50,26 @@ function misconfigured(): NextResponse {
   // Nombres de variables, nunca valores. Un 500 legible vale mil veces mas que un
   // crash opaco cuando el problema es de configuracion del entorno.
   return new NextResponse(
-    `Configuracion incompleta: falta ${faltan} en el entorno del build.\n` +
-      `Cargala en Vercel (Settings → Environment Variables) y volve a desplegar.\n` +
-      `Ojo: las NEXT_PUBLIC_* se incrustan al compilar, asi que no alcanza con ` +
-      `agregarlas despues: hay que reconstruir.`,
+    `Configuracion incompleta: falta ${faltan} en el entorno del build.\n\n` +
+      `Cargala en Vercel (Settings → Environment Variables) y volve a desplegar\n` +
+      `SIN cache: las NEXT_PUBLIC_* se incrustan al compilar, asi que agregarlas\n` +
+      `despues no alcanza, hay que reconstruir.\n\n` +
+      `Usa tipo "Config", no "Secret": una NEXT_PUBLIC_ termina igual en el\n` +
+      `JavaScript del navegador, no es secreta, y como Secret no se puede releer\n` +
+      `para verificar que quedo bien.\n\n` +
+      `Estado completo del entorno en /api/health`,
     { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } },
   );
 }
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // El healthcheck pasa SIEMPRE, incluso con la configuracion rota. Es lo unico que
+  // puede decir que falta, asi que bloquearlo justo cuando falta algo lo vuelve
+  // inutil: hay que elegir entre el diagnostico y el candado, y gana el diagnostico
+  // porque no expone valores.
+  if (pathname === "/api/health") return NextResponse.next();
 
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return misconfigured();
 
