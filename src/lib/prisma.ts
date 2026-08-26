@@ -13,7 +13,10 @@ function createPrismaClient() {
   const connectionString = process.env.DATABASE_URL;
 
   if (!connectionString) {
-    throw new Error("Falta DATABASE_URL. Revisa .env.local");
+    throw new Error(
+      "Falta DATABASE_URL. En local va en .env.local; en Vercel, en " +
+        "Settings → Environment Variables del proyecto.",
+    );
   }
 
   return new PrismaClient({
@@ -27,8 +30,30 @@ const globalForPrisma = globalThis as unknown as {
   prisma: ReturnType<typeof createPrismaClient> | undefined;
 };
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+function getPrismaClient() {
+  globalForPrisma.prisma ??= createPrismaClient();
+  return globalForPrisma.prisma;
 }
+
+/**
+ * El cliente se crea en el **primer uso real**, no al importar el modulo.
+ *
+ * Esto no es una optimizacion, es lo que permite que el build funcione. Durante
+ * `next build`, Next importa cada pagina para recolectar su configuracion; si el
+ * cliente se instanciara al importar, el build entero dependeria de tener
+ * DATABASE_URL disponible en tiempo de compilacion, y moria con
+ * "Failed to collect page data for /overview" aunque no ejecute una sola consulta.
+ *
+ * Con el proxy, construir y consultar quedan separados: el build no necesita
+ * credenciales, y si falta la variable el error aparece en la primera query, en
+ * runtime, con el mismo mensaje claro de siempre.
+ */
+export const prisma = new Proxy({} as ReturnType<typeof createPrismaClient>, {
+  get(_target, property) {
+    const client = getPrismaClient();
+    const value = Reflect.get(client as object, property, client);
+    // Los metodos (`$transaction`, `$queryRaw`…) se devuelven atados al cliente:
+    // sueltos perderian el `this` y fallarian al invocarlos.
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});
