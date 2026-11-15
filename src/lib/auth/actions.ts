@@ -65,7 +65,7 @@ export async function signInAction(
     return { fieldErrors: parsed.error.flatten().fieldErrors };
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
 
   if (error) {
@@ -122,7 +122,7 @@ export async function signUpAction(
     return { error: "Ya existe una cuenta con ese email." };
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data, error } = await supabase.auth.signUp({
     email: input.email,
     password: input.password,

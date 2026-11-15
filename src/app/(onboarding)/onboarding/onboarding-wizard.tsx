@@ -1,8 +1,7 @@
 "use client";
 
 import { Check, Upload } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useFormState } from "react-dom";
+import { useActionState, useState } from "react";
 import { toast } from "sonner";
 
 import { SubmitButton } from "@/components/auth/submit-button";
@@ -87,26 +86,37 @@ export function OnboardingWizard({
 }) {
   const [step, setStep] = useState(0);
 
-  const [companyState, companyAction] = useFormState(saveCompanyStep, initialState);
-  const [inviteState, inviteAction] = useFormState(inviteTeammate, initialState);
   const [invited, setInvited] = useState<string[]>([]);
 
-  useEffect(() => {
-    if (companyState.error) toast.error(companyState.error);
-    if (companyState.message) {
-      toast.success(companyState.message);
-      setStep(1);
-    }
-  }, [companyState]);
+  // Avanzar de paso y listar lo invitado son consecuencias de **esta** llamada, así
+  // que van donde la llamada termina. En un efecto sobre el resultado, invitar dos
+  // veces al mismo email no cambia el estado y el aviso no se repite.
+  const [companyState, companyAction] = useActionState(
+    async (previous: typeof initialState, formData: FormData) => {
+      const outcome = await saveCompanyStep(previous, formData);
+      if (outcome.error) toast.error(outcome.error);
+      if (outcome.message) {
+        toast.success(outcome.message);
+        setStep(1);
+      }
+      return outcome;
+    },
+    initialState,
+  );
 
-  useEffect(() => {
-    if (inviteState.error) toast.error(inviteState.error);
-    if (inviteState.message) {
-      toast.success(inviteState.message);
-      // El mensaje trae el email al final: "Invitación enviada a x@y.com."
-      setInvited((prev) => [...prev, inviteState.message!.split(" ").pop()!]);
-    }
-  }, [inviteState]);
+  const [inviteState, inviteAction] = useActionState(
+    async (previous: typeof initialState, formData: FormData) => {
+      const outcome = await inviteTeammate(previous, formData);
+      if (outcome.error) toast.error(outcome.error);
+      if (outcome.message) {
+        toast.success(outcome.message);
+        // El mensaje trae el email al final: "Invitación enviada a x@y.com."
+        setInvited((prev) => [...prev, outcome.message!.split(" ").pop()!]);
+      }
+      return outcome;
+    },
+    initialState,
+  );
 
   return (
     <div className="w-full max-w-lg">

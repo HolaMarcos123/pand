@@ -42,7 +42,7 @@ function currencyOf(settings: unknown): string {
  * Component que la pida dentro del mismo request compartan una sola consulta.
  */
 export const getSession = cache(async (): Promise<SessionData | null> => {
-  const supabase = createClient();
+  const supabase = await createClient();
 
   const {
     data: { user },

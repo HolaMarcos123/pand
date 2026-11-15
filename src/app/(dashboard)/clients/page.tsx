@@ -30,22 +30,22 @@ const STATUSES: ClientStatus[] = [
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams: Record<string, string | undefined>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const session = await requireSession();
+  const [session, query] = await Promise.all([requireSession(), searchParams]);
 
   const filters: ClientFilters = {};
-  if (searchParams.q) filters.q = searchParams.q.slice(0, 80);
-  if (searchParams.portfolio) filters.portfolioId = searchParams.portfolio;
-  if (PRIORITIES.includes(searchParams.priority as ClientPriority)) {
-    filters.priority = searchParams.priority as ClientPriority;
+  if (query.q) filters.q = query.q.slice(0, 80);
+  if (query.portfolio) filters.portfolioId = query.portfolio;
+  if (PRIORITIES.includes(query.priority as ClientPriority)) {
+    filters.priority = query.priority as ClientPriority;
   }
-  if (STATUSES.includes(searchParams.status as ClientStatus)) {
-    filters.status = searchParams.status as ClientStatus;
+  if (STATUSES.includes(query.status as ClientStatus)) {
+    filters.status = query.status as ClientStatus;
   }
-  if (searchParams.assigned) filters.assigned = searchParams.assigned;
+  if (query.assigned) filters.assigned = query.assigned;
 
-  const page = Number.parseInt(searchParams.page ?? "1", 10) || 1;
+  const page = Number.parseInt(query.page ?? "1", 10) || 1;
 
   const [result, portfolios, operators] = await Promise.all([
     getClients(
@@ -70,11 +70,11 @@ export default async function ClientsPage({
       canAssign={session.user.role !== "OPERATOR"}
       canSeeScore={isFeatureEnabled("ai_agent", session.organization.plan)}
       filters={{
-        q: searchParams.q ?? "",
-        portfolio: searchParams.portfolio ?? "",
-        priority: searchParams.priority ?? "",
-        status: searchParams.status ?? "",
-        assigned: searchParams.assigned ?? "",
+        q: query.q ?? "",
+        portfolio: query.portfolio ?? "",
+        priority: query.priority ?? "",
+        status: query.status ?? "",
+        assigned: query.assigned ?? "",
       }}
     />
   );

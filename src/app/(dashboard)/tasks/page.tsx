@@ -42,10 +42,10 @@ function parseFilters(params: Record<string, string | undefined>): TaskFilters {
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Record<string, string | undefined>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
-  const session = await requireSession();
-  const filters = parseFilters(searchParams);
+  const [session, query] = await Promise.all([requireSession(), searchParams]);
+  const filters = parseFilters(query);
 
   const [tasks, portfolios] = await Promise.all([
     getTasks(
@@ -67,9 +67,9 @@ export default async function TasksPage({
       // puede usar <PlanGuard>, que es servidor.
       canSeeScore={isFeatureEnabled("ai_agent", session.organization.plan)}
       filters={{
-        portfolio: searchParams.portfolio ?? "",
-        priority: searchParams.priority ?? "",
-        status: searchParams.status ?? "",
+        portfolio: query.portfolio ?? "",
+        priority: query.priority ?? "",
+        status: query.status ?? "",
       }}
     />
   );

@@ -75,6 +75,11 @@ export function ClientSheet({
   const [promiseAmount, setPromiseAmount] = useState("");
   const [promiseDate, setPromiseDate] = useState("");
 
+  // react-hooks/set-state-in-effect: acá el efecto es el lugar correcto. Trae la
+  // ficha del deudor elegido desde el servidor, y el spinner tiene que prenderse
+  // antes del await, no después. Mover esto a Suspense es un cambio de arquitectura
+  // del panel, no parte de la subida de versión.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!clientId) {
       setDetail(null);
@@ -106,6 +111,7 @@ export function ClientSheet({
     return () => {
       cancelled = true;
     };
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [clientId]);
 
   const availableResults = RESULTS_BY_TYPE[actionType];

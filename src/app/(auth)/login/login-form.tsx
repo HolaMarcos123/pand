@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
-import { useFormState } from "react-dom";
+import { useActionState, useEffect } from "react";
 import { toast } from "sonner";
 
 import { SubmitButton } from "@/components/auth/submit-button";
@@ -12,7 +11,7 @@ import { signInAction, type ActionState } from "@/lib/auth/actions";
 const initialState: ActionState = {};
 
 export function LoginForm({ redirectTo }: { redirectTo?: string }) {
-  const [state, formAction] = useFormState(signInAction, initialState);
+  const [state, formAction] = useActionState(signInAction, initialState);
 
   useEffect(() => {
     if (state.error) toast.error(state.error);

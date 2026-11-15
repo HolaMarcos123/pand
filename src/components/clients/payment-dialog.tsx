@@ -3,7 +3,7 @@
 import { Loader2 } from "lucide-react";
 
 import type { PaymentMethod } from "@/generated/prisma/enums";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -44,7 +44,7 @@ export function PaymentDialog({
   );
 
   const [selected, setSelected] = useState<string[]>([]);
-  const [amount, setAmount] = useState("");
+  const [amountDraft, setAmountDraft] = useState("");
   const [amountTouched, setAmountTouched] = useState(false);
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [method, setMethod] = useState<string>("BANK_TRANSFER");
@@ -61,19 +61,30 @@ export function PaymentDialog({
 
   // El monto sigue a lo tildado hasta que el usuario lo edita a mano: a partir de
   // ahí manda él, porque un cobro parcial sobre una factura elegida es normal.
-  useEffect(() => {
-    if (!amountTouched) setAmount(selectedTotal ? String(selectedTotal) : "");
-  }, [selectedTotal, amountTouched]);
+  //
+  // Es un valor **derivado**, no estado: se calcula en el render. Antes vivía en un
+  // efecto que escribía estado, y eso dispara un render en cascada por cada tilde.
+  const amount = amountTouched
+    ? amountDraft
+    : selectedTotal
+      ? String(selectedTotal)
+      : "";
 
-  useEffect(() => {
+  // Reset al cerrar. También en el render, con el patrón que documenta React para
+  // "cambió una prop y hay que reiniciar estado": comparar contra el valor anterior.
+  // En un efecto, React pinta el diálogo con los datos del cobro anterior y recién
+  // después los limpia.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (wasOpen !== open) {
+    setWasOpen(open);
     if (!open) {
       setSelected([]);
-      setAmount("");
+      setAmountDraft("");
       setAmountTouched(false);
       setReference("");
       setMethod("BANK_TRANSFER");
     }
-  }, [open]);
+  }
 
   function toggle(invoiceId: string) {
     setSelected((current) =>
@@ -173,7 +184,7 @@ export function PaymentDialog({
               value={amount}
               onChange={(event) => {
                 setAmountTouched(true);
-                setAmount(event.target.value);
+                setAmountDraft(event.target.value);
               }}
             />
             {selected.length > 0 && (

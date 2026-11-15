@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useFormState } from "react-dom";
+import { useActionState, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { SubmitButton } from "@/components/auth/submit-button";
@@ -19,7 +18,7 @@ function FieldError({ messages }: { messages?: string[] }) {
 }
 
 export function RegisterForm() {
-  const [state, formAction] = useFormState(signUpAction, initialState);
+  const [state, formAction] = useActionState(signUpAction, initialState);
 
   // La moneda sigue al país elegido, pero queda editable: una financiera paraguaya
   // puede tener cartera en dólares.

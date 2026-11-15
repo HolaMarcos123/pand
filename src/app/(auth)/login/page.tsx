@@ -14,11 +14,15 @@ export const metadata: Metadata = {
 // obligue a reconstruir.
 export const dynamic = "force-dynamic";
 
-export default function LoginPage({
+export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: { redirectTo?: string };
+  // Promise desde Next 15: leer el querystring es lo que vuelve dinamica a la
+  // pagina, asi que Next lo entrega recien cuando se lo pide.
+  searchParams: Promise<{ redirectTo?: string }>;
 }) {
+  const { redirectTo } = await searchParams;
+
   return (
     <main className="grid min-h-screen lg:grid-cols-2">
       <BrandPanel />
@@ -32,7 +36,7 @@ export default function LoginPage({
             Seguí la cartera de tu equipo desde un solo lugar.
           </p>
 
-          <LoginForm redirectTo={searchParams.redirectTo} />
+          <LoginForm redirectTo={redirectTo} />
 
           {/* Sin registro abierto no se ofrece un camino que termina en una puerta
               cerrada: quien no tiene cuenta necesita una invitación, no un link. */}

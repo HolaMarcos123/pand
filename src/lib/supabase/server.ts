@@ -3,8 +3,11 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
 // Cliente de Supabase para Server Components, Server Actions y Route Handlers.
-export function createClient() {
-  const cookieStore = cookies();
+//
+// Async desde Next 15: cookies() dejo de ser sincrono porque el request se resuelve
+// despues de empezar a renderizar. Por eso todos los llamadores la esperan.
+export async function createClient() {
+  const cookieStore = await cookies();
 
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
