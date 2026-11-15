@@ -76,6 +76,12 @@ enum InvoiceStatus {
   PARTIAL
   PAID
   CANCELLED
+  // Refinanciado: la deuda se reemplazo por otra. Sale de la cartera activa sin
+  // estar pagada.
+  REFINANCED
+  // Castigado: contablemente ya no es activo, pero se sigue pudiendo recuperar.
+  // NO cuenta como cartera activa — es el error #16 del QA de CobrAI.
+  WRITTEN_OFF
 }
 
 enum ActionType {
@@ -99,13 +105,20 @@ enum ActionResult {
   WRONG_NUMBER
 }
 
-// El brief no enumera los medios de pago: estos son un supuesto.
+// Medios de pago. Los cinco ultimos son los de Paraguay: un deudor local paga por
+// una boca de cobranza o una billetera, no por "transferencia generica", y el reporte
+// de recupero por metodo no sirve si todo cae en OTHER.
 enum PaymentMethod {
   CASH
   BANK_TRANSFER
   CARD
   CHECK
   DEPOSIT
+  BANCARD
+  TIGO_MONEY
+  PERSONAL_ENVIOS
+  PAGO_EXPRESS
+  AQUI_PAGO
   OTHER
 }
 
@@ -149,6 +162,7 @@ model Organization {
   payments           Payment[]
   integrationConfigs IntegrationConfig[]
   aiConversations    AiConversation[]
+  segments           Segment[]
 
   @@map("organizations")
 }
@@ -172,6 +186,7 @@ model User {
   managementActions  ManagementAction[] @relation("ActionOperator")
   registeredPayments Payment[]          @relation("PaymentRegistrar")
   aiConversations    AiConversation[]
+  segments           Segment[]          @relation("SegmentAuthor")
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -247,6 +262,9 @@ model Invoice {
   organizationId String        @map("organization_id") @db.Uuid
   clientId       String        @map("client_id") @db.Uuid
   invoiceNumber  String        @map("invoice_number")
+  // Que se le vendio o presto: "Credito personal", "Motocicleta Honda CG 160".
+  // Va aparte de description porque se filtra y se reporta por producto.
+  product        String?
   description    String?
   amount         Decimal       @db.Decimal(18, 2)
   currency       String        @default("PYG")
@@ -362,4 +380,27 @@ model AiConversation {
   @@index([organizationId])
   @@index([userId, createdAt])
   @@map("ai_conversations")
+}
+
+/// Filtro guardado sobre la lista de deudores.
+///
+/// Es, literalmente, una combinacion de parametros de /clients con un nombre. Se
+/// guarda el querystring y no una consulta propia: asi el segmento no puede
+/// desincronizarse de los filtros reales de la pantalla, y agregar un filtro nuevo
+/// no obliga a migrar los segmentos existentes.
+model Segment {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  name           String
+  filters        Json     @default("{}")
+  createdById    String?  @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?        @relation("SegmentAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("segments")
 }

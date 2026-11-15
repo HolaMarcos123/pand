@@ -23,9 +23,12 @@ import type { Tranche } from "@/lib/queries/dashboard";
 export function TrancheChart({
   data,
   currency,
+  writtenOff,
 }: {
   data: Tranche[];
   currency: string;
+  /** Cartera castigada: se informa al pie, fuera del gráfico. */
+  writtenOff: number;
 }) {
   const isEmpty = data.every((item) => item.amount === 0);
 
@@ -41,9 +44,19 @@ export function TrancheChart({
 
   return (
     <div className="rounded-card bg-white p-5 shadow-card">
-      <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
-        Cartera por tramo de mora
-      </p>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
+          Cartera activa por tramo
+        </p>
+        {writtenOff > 0 && (
+          <p className="text-xs text-pand-gris">
+            Castigado, fuera de la cartera activa:{" "}
+            <span className="mono text-pand-coral">
+              {formatCurrency(writtenOff, currency)}
+            </span>
+          </p>
+        )}
+      </div>
 
       <div className="mt-4 h-[240px]">
         <ResponsiveContainer width="100%" height="100%">
@@ -85,10 +98,12 @@ export function TrancheChart({
               }}
             />
             <Bar dataKey="amount" radius={[6, 6, 0, 0]}>
+              {/* Una sola serie destacada, como pide el manual: el peor tramo
+                  activo. El resto en gris para que el celeste signifique algo. */}
               {data.map((item) => (
                 <Cell
-                  key={item.label}
-                  fill={item.label === "+90" ? "#7BE1FF" : "#E6E9EE"}
+                  key={item.key}
+                  fill={item.key === "LEGAL" ? "#7BE1FF" : "#E6E9EE"}
                 />
               ))}
             </Bar>

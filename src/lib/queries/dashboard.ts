@@ -1,3 +1,9 @@
+import {
+  TRAMOS,
+  TRAMO_LABELS,
+  tramoSql,
+  type Tramo,
+} from "@/lib/collections/tramos";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -27,9 +33,11 @@ export type Kpis = {
   promisesCount: number;
   overdue90Amount: number;
   overdue90Rate: number;
+  /** Castigado: fuera de la cartera activa, se informa aparte. */
+  writtenOffAmount: number;
 };
 
-export type Tranche = { label: string; amount: number };
+export type Tranche = { key: Tramo; label: string; amount: number };
 
 export type OperatorRow = {
   id: string;
@@ -41,7 +49,7 @@ export type OperatorRow = {
 };
 
 export async function getKpis(organizationId: string): Promise<Kpis> {
-  const [recovered, open, promises, overdue] = await Promise.all([
+  const [recovered, open, promises, overdue, castigado] = await Promise.all([
     prisma.$queryRaw<[{ amount: number }]>`
       SELECT COALESCE(SUM(amount), 0)::float8 AS amount
         FROM payments
@@ -69,6 +77,14 @@ export async function getKpis(organizationId: string): Promise<Kpis> {
          AND status = ANY(${OPEN_INVOICE_STATUSES as unknown as string[]}::"InvoiceStatus"[])
          AND days_overdue > 90
     `,
+    // Castigado: fuera de la cartera activa. Se mide aparte justamente para no
+    // sumarlo al saldo activo, que es el bug #16 del QA de CobrAI.
+    prisma.$queryRaw<[{ amount: number }]>`
+      SELECT COALESCE(SUM(amount - paid_amount), 0)::float8 AS amount
+        FROM invoices
+       WHERE organization_id = ${organizationId}::uuid
+         AND status = 'WRITTEN_OFF'
+    `,
   ]);
 
   const recoveredAmount = recovered[0]?.amount ?? 0;
@@ -87,36 +103,36 @@ export async function getKpis(organizationId: string): Promise<Kpis> {
     promisesCount: promises[0]?.count ?? 0,
     overdue90Amount,
     overdue90Rate: openDebt ? (overdue90Amount / openDebt) * 100 : 0,
+    writtenOffAmount: castigado[0]?.amount ?? 0,
   };
 }
 
-/** Cartera abierta repartida en los cuatro tramos de mora del manual. */
+/**
+ * Cartera **activa** repartida por tramo.
+ *
+ * Los tramos salen de `lib/collections/tramos`, el mismo catálogo que usan la tabla
+ * de clientes y los filtros. El castigo no aparece acá porque no es cartera activa:
+ * se informa como KPI aparte.
+ */
 export async function getTranches(organizationId: string): Promise<Tranche[]> {
   const rows = await prisma.$queryRaw<{ bucket: string; amount: number }[]>`
-    SELECT CASE
-             WHEN days_overdue <= 0  THEN 'ok'
-             WHEN days_overdue <= 30 THEN '1-30'
-             WHEN days_overdue <= 60 THEN '31-60'
-             WHEN days_overdue <= 90 THEN '61-90'
-             ELSE '+90'
-           END AS bucket,
-           COALESCE(SUM(amount - paid_amount), 0)::float8 AS amount
-      FROM invoices
-     WHERE organization_id = ${organizationId}::uuid
-       AND status = ANY(${OPEN_INVOICE_STATUSES as unknown as string[]}::"InvoiceStatus"[])
+    SELECT ${tramoSql()} AS bucket,
+           COALESCE(SUM(i.amount - i.paid_amount), 0)::float8 AS amount
+      FROM invoices i
+     WHERE i.organization_id = ${organizationId}::uuid
+       AND i.status = ANY(${OPEN_INVOICE_STATUSES as unknown as string[]}::"InvoiceStatus"[])
      GROUP BY 1
   `;
 
-  const found = new Map(rows.map((row) => [row.bucket, row.amount]));
+  const encontrados = new Map(rows.map((row) => [row.bucket, row.amount]));
 
-  // Orden fijo: un GROUP BY no devuelve los tramos vacíos y el gráfico necesita las
-  // cuatro barras siempre, aunque valgan cero.
-  return [
-    { label: "1-30", amount: found.get("1-30") ?? 0 },
-    { label: "31-60", amount: found.get("31-60") ?? 0 },
-    { label: "61-90", amount: found.get("61-90") ?? 0 },
-    { label: "+90", amount: found.get("+90") ?? 0 },
-  ];
+  // Orden fijo y tramos completos: un GROUP BY no devuelve los vacíos, y el gráfico
+  // necesita todas las barras siempre, aunque valgan cero.
+  return TRAMOS.map((t) => ({
+    key: t.key,
+    label: TRAMO_LABELS[t.key],
+    amount: encontrados.get(t.key) ?? 0,
+  }));
 }
 
 /** Tabla de operadores del mes, ordenada por lo cobrado. */

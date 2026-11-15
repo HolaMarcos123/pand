@@ -18,6 +18,14 @@ export type NavItem = {
   icon: LucideIcon;
   /** Muestra el contador de tareas del día al lado del label. */
   showTaskBadge?: boolean;
+  /**
+   * La pantalla todavía no existe. Se dibuja apagada y no navega.
+   *
+   * Es a propósito que siga en el menú: muestra hacia dónde va el producto. Lo que
+   * no se puede es dejarla como link, porque lleva a un 404 — y para un operador,
+   * que ve dos ítems, uno roto es la mitad del producto.
+   */
+  comingSoon?: boolean;
 };
 
 /**
@@ -36,16 +44,16 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/clients", label: "Clientes", icon: UsersRound },
     { href: "/tasks", label: "Tareas", icon: ListChecks, showTaskBadge: true },
     { href: "/admin/users", label: "Usuarios", icon: Users },
-    { href: "/reports", label: "Reportes", icon: BarChart3 },
-    { href: "/ai-agent", label: "IA", icon: Bot },
-    { href: "/admin/settings", label: "Config", icon: Settings },
+    { href: "/reports", label: "Reportes", icon: BarChart3, comingSoon: true },
+    { href: "/ai-agent", label: "IA", icon: Bot, comingSoon: true },
+    { href: "/admin/settings", label: "Config", icon: Settings, comingSoon: true },
   ],
   SUPERVISOR: [
     { href: "/overview", label: "Overview", icon: LayoutDashboard },
     { href: "/clients", label: "Clientes", icon: UsersRound },
     { href: "/tasks", label: "Tareas", icon: ListChecks, showTaskBadge: true },
-    { href: "/reports", label: "Reportes", icon: BarChart3 },
-    { href: "/ai-agent", label: "IA", icon: Bot },
+    { href: "/reports", label: "Reportes", icon: BarChart3, comingSoon: true },
+    { href: "/ai-agent", label: "IA", icon: Bot, comingSoon: true },
   ],
   OPERATOR: [
     { href: "/tasks", label: "Mis Tareas", icon: ListChecks, showTaskBadge: true },

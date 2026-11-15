@@ -96,10 +96,56 @@ export function suggestPaymentMapping(
  * rechazar la fila: el medio es informativo y perder un cobro por no entender
  * "transf." sería absurdo.
  */
+/**
+ * Los medios de pago, con su etiqueta. **Una sola lista para todo el producto:**
+ * el importador, el modal de cobro y el reporte de recupero por método leen de acá.
+ *
+ * Los cinco del medio son los de Paraguay. Sin ellos, un cobro hecho en una boca de
+ * cobranza entra como OTHER y el reporte por método no sirve para decidir dónde
+ * conviene empujar la cobranza.
+ */
+export const PAYMENT_METHODS: readonly { value: PaymentMethod; label: string }[] = [
+  { value: "BANK_TRANSFER", label: "Transferencia" },
+  { value: "CASH", label: "Efectivo" },
+  { value: "DEPOSIT", label: "Depósito" },
+  { value: "CARD", label: "Tarjeta" },
+  { value: "CHECK", label: "Cheque" },
+  { value: "BANCARD", label: "Bancard" },
+  { value: "TIGO_MONEY", label: "Tigo Money" },
+  { value: "PERSONAL_ENVIOS", label: "Personal Envíos" },
+  { value: "PAGO_EXPRESS", label: "Pago Express" },
+  { value: "AQUI_PAGO", label: "Aquí Pago" },
+  { value: "OTHER", label: "Otro" },
+] as const;
+
+export const PAYMENT_METHOD_VALUES = PAYMENT_METHODS.map((m) => m.value) as [
+  PaymentMethod,
+  ...PaymentMethod[],
+];
+
+const PAYMENT_METHOD_LABELS = new Map(
+  PAYMENT_METHODS.map((m) => [m.value, m.label] as const),
+);
+
+/** Etiqueta en español de un medio de pago, para tablas y reportes. */
+export function paymentMethodLabel(method: PaymentMethod): string {
+  return PAYMENT_METHOD_LABELS.get(method) ?? "Otro";
+}
+
 export function parsePaymentMethod(raw: unknown): PaymentMethod {
   if (raw === null || raw === undefined) return "OTHER";
   const value = normalizeHeader(String(raw));
   if (!value) return "OTHER";
+
+  // Los medios paraguayos van primero porque varios caen en las reglas genéricas:
+  // "bancard" contiene "card" y "pago express" contiene "pago". Si se evalúan
+  // después, nunca se alcanzan.
+  if (/(bancard|infonet)/.test(value)) return "BANCARD";
+  if (/(tigomoney|billetera.?tigo|tigo)/.test(value)) return "TIGO_MONEY";
+  if (/(personalenvios|billeterapersonal|personal)/.test(value))
+    return "PERSONAL_ENVIOS";
+  if (/(pagoexpress|pagoexpres)/.test(value)) return "PAGO_EXPRESS";
+  if (/(aquipago|aqipago)/.test(value)) return "AQUI_PAGO";
 
   if (/(efectivo|cash|contado)/.test(value)) return "CASH";
   if (/(transf|spi|giro|wire|banco)/.test(value)) return "BANK_TRANSFER";

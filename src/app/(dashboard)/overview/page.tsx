@@ -56,7 +56,11 @@ export default async function OverviewPage() {
 
       {/* Fila 2 — cartera por tramo */}
       <section>
-        <TrancheChart data={tranches} currency={currency} />
+        <TrancheChart
+          data={tranches}
+          currency={currency}
+          writtenOff={kpis.writtenOffAmount}
+        />
       </section>
 
       {/* Fila 3 — operadores del mes */}

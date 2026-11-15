@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+
 import { requireSession } from "@/lib/auth/session";
+import { PAYMENT_METHOD_VALUES } from "@/lib/import/payment-config";
 import { allocateToInvoices, refreshClientBalance } from "@/lib/payments/apply";
 import { prisma } from "@/lib/prisma";
 import { getClientDetail } from "@/lib/queries/tasks";
@@ -145,7 +147,7 @@ const paymentSchema = z.object({
   invoiceIds: z.array(z.string().uuid()).max(100).default([]),
   amount: z.number().positive().max(1e15),
   paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  method: z.enum(["CASH", "BANK_TRANSFER", "CARD", "CHECK", "DEPOSIT", "OTHER"]),
+  method: z.enum(PAYMENT_METHOD_VALUES),
   reference: z.string().trim().max(120).nullish(),
 });
 

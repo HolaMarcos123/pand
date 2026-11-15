@@ -3,6 +3,7 @@ import { z } from "zod";
 import { parseAmount, parseDate, parseText } from "@/lib/import/parse-values";
 import {
   PAYMENT_FIELDS,
+  PAYMENT_METHOD_VALUES,
   parsePaymentMethod,
   type PaymentFieldKey,
 } from "@/lib/import/payment-config";
@@ -29,7 +30,8 @@ export const paymentRowSchema = z
     amount: z.number().finite().positive().max(1e15),
     paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "fecha inválida"),
     reference: optionalText(120),
-    method: z.enum(["CASH", "BANK_TRANSFER", "CARD", "CHECK", "DEPOSIT", "OTHER"]),
+    // Del catálogo, no una copia: agregar un medio de pago no puede dejar de validar.
+    method: z.enum(PAYMENT_METHOD_VALUES),
   })
   .refine((row) => row.matchExternalId || row.matchDocument, {
     message: "hace falta el ID o el documento del deudor",

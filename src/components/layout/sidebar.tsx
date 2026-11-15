@@ -49,6 +49,26 @@ export function Sidebar({ taskCount }: { taskCount: number }) {
             pathname === item.href || pathname.startsWith(`${item.href}/`);
           const Icon = item.icon;
 
+          // Pantalla todavía no construida: se muestra apagada y sin navegar. Un
+          // link a una ruta inexistente manda al usuario a un 404 y parece que el
+          // producto está roto; apagado, se lee como "esto viene después".
+          if (item.comingSoon) {
+            return (
+              <span
+                key={item.href}
+                aria-disabled="true"
+                title={`${item.label} todavía no está disponible`}
+                className="flex cursor-not-allowed items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold text-pand-gris/50"
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="flex-1">{item.label}</span>
+                <span className="rounded-badge bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-pand-gris">
+                  Pronto
+                </span>
+              </span>
+            );
+          }
+
           return (
             <Link
               key={item.href}

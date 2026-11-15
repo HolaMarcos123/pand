@@ -1,6 +1,8 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
+
+import type { PaymentMethod } from "@/generated/prisma/enums";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -16,17 +18,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { formatCurrency } from "@/lib/format";
+import { PAYMENT_METHODS } from "@/lib/import/payment-config";
 import type { ClientDetail } from "@/lib/queries/tasks";
 import { registerPayment } from "@/lib/tasks/actions";
-
-const METHODS = [
-  { value: "BANK_TRANSFER", label: "Transferencia" },
-  { value: "CASH", label: "Efectivo" },
-  { value: "DEPOSIT", label: "Depósito" },
-  { value: "CARD", label: "Tarjeta" },
-  { value: "CHECK", label: "Cheque" },
-  { value: "OTHER", label: "Otro" },
-] as const;
 
 export function PaymentDialog({
   open,
@@ -102,7 +96,7 @@ export function PaymentDialog({
         invoiceIds: selected,
         amount: value,
         paymentDate: date,
-        method: method as (typeof METHODS)[number]["value"],
+        method: method as PaymentMethod,
         reference: reference.trim() || null,
       });
 
@@ -206,7 +200,7 @@ export function PaymentDialog({
                 value={method}
                 onChange={(event) => setMethod(event.target.value)}
               >
-                {METHODS.map((item) => (
+                {PAYMENT_METHODS.map((item) => (
                   <option key={item.value} value={item.value}>
                     {item.label}
                   </option>
