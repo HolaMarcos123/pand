@@ -109,12 +109,28 @@ export async function refreshClientBalance(
               WHERE i.client_id = c.id
                 AND i.status IN ('PENDING', 'PARTIAL')
            ), 0),
+           -- Quedarse sin comprobantes abiertos NO es lo mismo que haber pagado.
+           -- La regla anterior marcaba "Pagado" a un deudor al que le castigaron
+           -- toda la deuda, que es justo el caso contrario. El castigo gana sobre
+           -- el pago: con una sola deuda castigada el deudor no cumplió.
            status = CASE
-                      WHEN NOT EXISTS (
+                      WHEN EXISTS (
                         SELECT 1 FROM invoices i
                          WHERE i.client_id = c.id
                            AND i.status IN ('PENDING', 'PARTIAL')
+                      ) THEN c.status
+                      WHEN EXISTS (
+                        SELECT 1 FROM invoices i
+                         WHERE i.client_id = c.id
+                           AND i.status = 'WRITTEN_OFF'
+                      ) THEN 'LOST'::"ClientStatus"
+                      WHEN EXISTS (
+                        SELECT 1 FROM invoices i
+                         WHERE i.client_id = c.id
+                           AND i.status = 'PAID'
                       ) THEN 'PAID'::"ClientStatus"
+                      -- Solo refinanciados o anulados: la deuda se movió a otro
+                      -- lado o no debió existir. El estado del deudor no cambia.
                       ELSE c.status
                     END,
            updated_at = now()

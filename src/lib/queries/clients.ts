@@ -1,8 +1,33 @@
 import { Prisma } from "@/generated/prisma/client";
 import type { ClientPriority, ClientStatus, Role } from "@/generated/prisma/enums";
+import { tramoCliente, type Tramo } from "@/lib/collections/tramos";
+import { tramoClienteSql } from "@/lib/collections/tramos-sql";
 import { prisma } from "@/lib/prisma";
 
 export const CLIENTS_PER_PAGE = 25;
+
+/**
+ * Resumen de los comprobantes del deudor, en un solo recorrido.
+ *
+ * Va como fragmento porque lo necesitan las dos consultas —la página y el conteo—
+ * y porque el filtro por tramo se apoya en sus columnas. Si el conteo no lo
+ * trajera, filtrar por tramo daría un total que no coincide con las filas.
+ */
+const MORA_LATERAL = Prisma.sql`
+  LEFT JOIN LATERAL (
+    SELECT MAX(i.days_overdue) FILTER (WHERE i.status IN ('PENDING', 'PARTIAL')) AS dias,
+           COUNT(*) FILTER (WHERE i.status IN ('PENDING', 'PARTIAL'))::int       AS abiertos,
+           COUNT(*) FILTER (WHERE i.status = 'WRITTEN_OFF')::int                 AS castigados,
+           string_agg(DISTINCT i.product, ', ')                                  AS productos
+      FROM invoices i
+     WHERE i.client_id = c.id
+  ) mora ON true`;
+
+const TRAMO_DEL_CLIENTE = tramoClienteSql(
+  Prisma.raw("mora.dias"),
+  Prisma.raw("mora.abiertos"),
+  Prisma.raw("mora.castigados"),
+);
 
 export type ClientListRow = {
   id: string;
@@ -14,6 +39,10 @@ export type ClientListRow = {
   priority: ClientPriority;
   status: ClientStatus;
   daysOverdue: number;
+  /** Tramo del deudor: el peor de sus comprobantes abiertos. */
+  tramo: Tramo;
+  /** Productos distintos que debe, para no tener que abrir la ficha. */
+  products: string | null;
   portfolioName: string | null;
   assignedToId: string | null;
   assignedToName: string | null;
@@ -26,6 +55,8 @@ export type ClientFilters = {
   status?: ClientStatus;
   /** Un id de usuario, o el literal "unassigned" para los que no tienen operador. */
   assigned?: string;
+  tramo?: Tramo;
+  product?: string;
 };
 
 export type ClientListResult = {
@@ -86,13 +117,29 @@ export async function getClients(
   } else if (filters.assigned) {
     where.push(Prisma.sql`c.assigned_to = ${filters.assigned}::uuid`);
   }
+  if (filters.tramo) {
+    where.push(Prisma.sql`${TRAMO_DEL_CLIENTE} = ${filters.tramo}`);
+  }
+  if (filters.product) {
+    // Igualdad y no ILIKE: el producto viene de un selector armado con los valores
+    // que ya existen en la cartera, así que buscar "parecido" solo traería ruido.
+    where.push(Prisma.sql`EXISTS (
+      SELECT 1 FROM invoices ip
+       WHERE ip.client_id = c.id
+         AND ip.organization_id = c.organization_id
+         AND ip.product = ${filters.product}
+    )`);
+  }
 
   const clause = Prisma.join(where, " AND ");
   const safePage = Math.max(1, page);
   const offset = (safePage - 1) * CLIENTS_PER_PAGE;
 
   const [rows, counts] = await Promise.all([
-    prisma.$queryRaw<ClientListRow[]>`
+    prisma.$queryRaw<(Omit<ClientListRow, "tramo"> & {
+      abiertos: number;
+      castigados: number;
+    })[]>`
       SELECT c.id,
              c.name,
              c.document_number AS "documentNumber",
@@ -102,18 +149,16 @@ export async function getClients(
              c.priority,
              c.status,
              COALESCE(mora.dias, 0) AS "daysOverdue",
+             mora.abiertos,
+             mora.castigados,
+             mora.productos    AS "products",
              p.name            AS "portfolioName",
              c.assigned_to     AS "assignedToId",
              u.full_name       AS "assignedToName"
         FROM clients c
         LEFT JOIN users u      ON u.id = c.assigned_to
         LEFT JOIN portfolios p ON p.id = c.portfolio_id
-        LEFT JOIN LATERAL (
-          SELECT MAX(i.days_overdue) AS dias
-            FROM invoices i
-           WHERE i.client_id = c.id
-             AND i.status IN ('PENDING', 'PARTIAL')
-        ) mora ON true
+        ${MORA_LATERAL}
        WHERE ${clause}
        ORDER BY array_position(
                   ARRAY['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']::"ClientPriority"[],
@@ -126,6 +171,7 @@ export async function getClients(
       SELECT COUNT(*)::int AS total,
              COUNT(*) FILTER (WHERE c.assigned_to IS NULL)::int AS unassigned
         FROM clients c
+        ${MORA_LATERAL}
        WHERE ${clause}
     `,
   ]);
@@ -133,7 +179,12 @@ export async function getClients(
   const total = counts[0]?.total ?? 0;
 
   return {
-    rows,
+    // El tramo se arma acá y no en SQL para que lo calcule la misma función que usa
+    // el resto del producto. La expresión SQL de arriba existe solo para filtrar.
+    rows: rows.map((row) => ({
+      ...row,
+      tramo: tramoCliente(row.daysOverdue, row.abiertos, row.castigados),
+    })),
     total,
     page: safePage,
     pages: Math.max(1, Math.ceil(total / CLIENTS_PER_PAGE)),
@@ -148,4 +199,52 @@ export async function getAssignableUsers(organizationId: string) {
     orderBy: { fullName: "asc" },
     select: { id: true, fullName: true, role: true },
   });
+}
+
+/**
+ * Los productos que realmente existen en la cartera de la organización.
+ *
+ * El selector se arma con esto y no con una lista fija: cada cliente de Pand vende
+ * otra cosa, y una lista hardcodeada envejece con la primera importación.
+ */
+export async function getProductOptions(organizationId: string): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ product: string }[]>`
+    SELECT DISTINCT product
+      FROM invoices
+     WHERE organization_id = ${organizationId}::uuid
+       AND product IS NOT NULL
+       AND product <> ''
+     ORDER BY product
+     LIMIT 200
+  `;
+
+  return rows.map((row) => row.product);
+}
+
+export type SegmentRow = {
+  id: string;
+  name: string;
+  filters: Record<string, string>;
+};
+
+/** Los segmentos de la organización, para la barra de /clients. */
+export async function getSegments(organizationId: string): Promise<SegmentRow[]> {
+  const rows = await prisma.segment.findMany({
+    where: { organizationId },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, filters: true },
+    take: 50,
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    // El JSON de la base es `unknown` para TypeScript: se normaliza acá y no en el
+    // componente, que no tiene cómo saber qué se guardó.
+    filters: Object.fromEntries(
+      Object.entries((row.filters ?? {}) as Record<string, unknown>)
+        .filter(([, value]) => typeof value === "string" && value)
+        .map(([key, value]) => [key, String(value)]),
+    ),
+  }));
 }

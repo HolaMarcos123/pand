@@ -16,6 +16,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import {
+  INVOICE_STATUS_LABELS,
+  INVOICE_STATUS_TONE,
+  MANUAL_INVOICE_STATUSES,
+  esCarteraActiva,
+  type ManualInvoiceStatus,
+} from "@/lib/collections/invoice-status";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import type { ClientDetail } from "@/lib/queries/tasks";
 import {
@@ -25,9 +32,18 @@ import {
   RESULTS_BY_TYPE,
   toWhatsappNumber,
 } from "@/lib/tasks/action-config";
-import { loadClientDetail, saveManagementAction } from "@/lib/tasks/actions";
+import {
+  loadClientDetail,
+  saveManagementAction,
+  setInvoiceStatus,
+} from "@/lib/tasks/actions";
 import { cn } from "@/lib/utils";
-import type { ActionResult, ActionType, ClientPriority } from "@/generated/prisma/enums";
+import type {
+  ActionResult,
+  ActionType,
+  ClientPriority,
+  InvoiceStatus,
+} from "@/generated/prisma/enums";
 
 import { PaymentDialog } from "./payment-dialog";
 
@@ -52,6 +68,7 @@ export function ClientSheet({
   currency,
   focusManagement,
   canSeeScore,
+  canChangeInvoiceStatus,
   onClose,
   onDone,
 }: {
@@ -59,6 +76,8 @@ export function ClientSheet({
   currency: string;
   focusManagement: boolean;
   canSeeScore: boolean;
+  /** Refinanciar y castigar saca deuda de la cartera: no es del operador. */
+  canChangeInvoiceStatus: boolean;
   onClose: () => void;
   onDone: (clientId: string, leftInbox: boolean) => void;
 }) {
@@ -66,6 +85,7 @@ export function ClientSheet({
   const [loading, setLoading] = useState(false);
   const [saving, startSaving] = useTransition();
   const [payOpen, setPayOpen] = useState(false);
+  const [changingInvoice, setChangingInvoice] = useState<string | null>(null);
 
   // Formulario de gestión
   const [actionType, setActionType] = useState<ActionType>("CALL");
@@ -116,6 +136,28 @@ export function ClientSheet({
 
   const availableResults = RESULTS_BY_TYPE[actionType];
   const isPromise = result === "PROMISE_PAY";
+
+  function cambiarEstado(invoiceId: string, status: ManualInvoiceStatus) {
+    setChangingInvoice(invoiceId);
+    startSaving(async () => {
+      const outcome = await setInvoiceStatus({ invoiceId, status });
+      setChangingInvoice(null);
+
+      if (!outcome.ok) {
+        toast.error(outcome.error);
+        return;
+      }
+
+      toast.success(`Comprobante marcado como ${INVOICE_STATUS_LABELS[status]}.`);
+      // Se recarga la ficha: cambiar el estado movió el saldo del deudor, y dejar
+      // el total viejo en pantalla es peor que tardar medio segundo.
+      const clienteId = detail?.id;
+      if (!clienteId) return;
+      const fresh = await loadClientDetail(clienteId);
+      if (fresh) setDetail(fresh);
+      onDone(clienteId, false);
+    });
+  }
 
   function submitManagement() {
     if (!clientId) return;
@@ -277,6 +319,11 @@ export function ClientSheet({
                             <p className="mono text-sm font-medium">
                               {invoice.invoiceNumber}
                             </p>
+                            {invoice.product && (
+                              <p className="truncate text-xs font-semibold text-pand-contorno">
+                                {invoice.product}
+                              </p>
+                            )}
                             <p className="mono text-xs text-pand-gris">
                               vence {invoice.dueDate}
                               {overdue && (
@@ -298,15 +345,48 @@ export function ClientSheet({
                                 currency,
                               )}
                             </p>
-                            <p className="text-xs text-pand-gris">
-                              {invoice.status === "PAID"
-                                ? "Pagado"
-                                : invoice.status === "PARTIAL"
-                                  ? "Parcial"
-                                  : invoice.status === "CANCELLED"
-                                    ? "Anulado"
-                                    : "Pendiente"}
+                            <p
+                              className={cn(
+                                "text-xs",
+                                INVOICE_STATUS_TONE[invoice.status as InvoiceStatus],
+                              )}
+                            >
+                              {INVOICE_STATUS_LABELS[invoice.status as InvoiceStatus] ??
+                                invoice.status}
                             </p>
+
+                            {canChangeInvoiceStatus && invoice.status !== "PAID" && (
+                              <NativeSelect
+                                aria-label={`Estado de ${invoice.invoiceNumber}`}
+                                className="mt-1 h-7 w-[150px] text-xs"
+                                value=""
+                                disabled={changingInvoice === invoice.id}
+                                onChange={(event) => {
+                                  const next = event.target.value as ManualInvoiceStatus;
+                                  if (!next) return;
+                                  cambiarEstado(invoice.id, next);
+                                }}
+                              >
+                                <option value="">Cambiar estado…</option>
+                                {MANUAL_INVOICE_STATUSES.filter(
+                                  (option) =>
+                                    option.value !== invoice.status &&
+                                    // "Volver a cartera" no tiene sentido si ya está.
+                                    !(
+                                      option.value === "PENDING" &&
+                                      esCarteraActiva(invoice.status as InvoiceStatus)
+                                    ),
+                                ).map((option) => (
+                                  <option
+                                    key={option.value}
+                                    value={option.value}
+                                    title={option.hint}
+                                  >
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </NativeSelect>
+                            )}
                           </div>
                         </div>
                       );

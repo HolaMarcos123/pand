@@ -66,6 +66,7 @@ export default async function TasksPage({
       // El plan se resuelve en el servidor: el panel es un Client Component y no
       // puede usar <PlanGuard>, que es servidor.
       canSeeScore={isFeatureEnabled("ai_agent", session.organization.plan)}
+      canChangeInvoiceStatus={session.user.role !== "OPERATOR"}
       filters={{
         portfolio: query.portfolio ?? "",
         priority: query.priority ?? "",

@@ -260,6 +260,16 @@ async function main() {
       },
     });
 
+    // Un deudor suele deber por un solo producto; a veces por dos.
+    const productoPrincipal = pick(PRODUCTOS);
+
+    // Una porción chica de la cartera ya salió de lo activo: castigada o
+    // refinanciada. Sin esto no hay con qué probar el tramo Castigo ni los estados
+    // nuevos, y el filtro se ve siempre vacío.
+    const suerte = rnd();
+    const castigado = suerte < 0.05;
+    const refinanciado = !castigado && suerte < 0.09;
+
     // 1 a 4 comprobantes, el más viejo define la mora del tramo.
     const cantidad = entre(1, 4);
     for (let j = 0; j < cantidad; j += 1) {
@@ -268,15 +278,24 @@ async function main() {
       // Un cuarto de los comprobantes tiene pago parcial.
       const parcial = rnd() < 0.25 ? Math.round(monto * (0.2 + rnd() * 0.5)) : 0;
 
+      const estado = castigado
+        ? "WRITTEN_OFF"
+        : refinanciado
+          ? "REFINANCED"
+          : parcial > 0
+            ? "PARTIAL"
+            : "PENDING";
+
       facturas.push({
         id: randomUUID(),
         organizationId,
         clientId,
         invoiceNumber: `F-${String(i + 1).padStart(4, "0")}-${j + 1}`,
+        product: rnd() < 0.2 ? pick(PRODUCTOS) : productoPrincipal,
         description: pick(PRODUCTOS),
         amount: monto,
         paidAmount: parcial,
-        status: parcial > 0 ? "PARTIAL" : "PENDING",
+        status: estado,
         currency: "PYG",
         dueDate: dias(vencimiento),
       });
@@ -410,6 +429,21 @@ async function main() {
               WHERE i.client_id = c.id AND i.status IN ('PENDING','PARTIAL')
            ), 0)
      WHERE c.organization_id = ${organizationId}::uuid
+  `;
+  // Mismo criterio que refreshClientBalance: sin deuda abierta y con algo
+  // castigado, el deudor es Perdido, no Pagado.
+  await prisma.$executeRaw`
+    UPDATE clients c
+       SET status = 'LOST'::"ClientStatus"
+     WHERE c.organization_id = ${organizationId}::uuid
+       AND NOT EXISTS (
+             SELECT 1 FROM invoices i
+              WHERE i.client_id = c.id AND i.status IN ('PENDING','PARTIAL')
+           )
+       AND EXISTS (
+             SELECT 1 FROM invoices i
+              WHERE i.client_id = c.id AND i.status = 'WRITTEN_OFF'
+           )
   `;
   await prisma.$executeRaw`SELECT public.refresh_overdue_and_priority()`;
 

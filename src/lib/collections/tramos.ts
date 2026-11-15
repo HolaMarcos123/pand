@@ -1,4 +1,3 @@
-import { Prisma } from "@/generated/prisma/client";
 import type { InvoiceStatus } from "@/generated/prisma/enums";
 
 /**
@@ -56,14 +55,6 @@ export const TRAMO_LABELS: Record<Tramo, string> = {
  */
 export const TRAMOS_ACTIVOS: readonly Tramo[] = TRAMOS.map((t) => t.key);
 
-/** Estados que siguen siendo cartera cobrable. */
-export const ESTADOS_ABIERTOS = ["PENDING", "PARTIAL"] as const;
-
-/** Un comprobante castigado o refinanciado salió de la cartera activa. */
-export function esCarteraActiva(status: InvoiceStatus): boolean {
-  return status === "PENDING" || status === "PARTIAL";
-}
-
 /**
  * Tramo de un comprobante.
  *
@@ -79,22 +70,20 @@ export function tramoDe(daysOverdue: number, status: InvoiceStatus): Tramo {
 }
 
 /**
- * La misma clasificación, como expresión SQL, generada de la misma tabla de límites.
+ * Tramo de un **deudor**, que no es lo mismo que el de un comprobante.
  *
- * Se usa en las agregaciones, donde clasificar en JavaScript obligaría a traer cada
- * comprobante solo para contarlo.
+ * Un deudor tiene varias deudas y se lo gestiona por la peor: si debe una cuota de
+ * hace 100 días y otra de hace 5, está en Legal, no al día. Por eso la antigüedad
+ * que entra acá es el máximo de sus comprobantes abiertos.
+ *
+ * Y si no le queda ninguno abierto pero tiene castigados, es Castigo: sin esta
+ * rama caería en "Al día", que es exactamente al revés de la realidad.
  */
-export function tramoSql(
-  diasCol: Prisma.Sql = Prisma.raw("i.days_overdue"),
-  estadoCol: Prisma.Sql = Prisma.raw("i.status"),
-): Prisma.Sql {
-  const ramas = TRAMOS.filter((t) => t.hasta !== null).map(
-    (t) => Prisma.sql`WHEN ${diasCol} <= ${t.hasta} THEN ${t.key}`,
-  );
-
-  return Prisma.sql`CASE
-    WHEN ${estadoCol} = 'WRITTEN_OFF' THEN 'CASTIGO'
-    ${Prisma.join(ramas, " ")}
-    ELSE ${TRAMOS[TRAMOS.length - 1].key}
-  END`;
+export function tramoCliente(
+  diasMaximos: number | null,
+  abiertos: number,
+  castigados: number,
+): Tramo {
+  if (abiertos === 0) return castigados > 0 ? "CASTIGO" : "AL_DIA";
+  return tramoDe(diasMaximos ?? 0, "PENDING");
 }

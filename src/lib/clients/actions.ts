@@ -139,3 +139,111 @@ export async function distributeClients(
 
   return { ok: true, assigned };
 }
+
+// ───────────────────────── Segmentos ─────────────────────────
+
+/**
+ * Las claves que un segmento puede guardar: exactamente los filtros de /clients.
+ *
+ * Se guarda el querystring y no una consulta propia. Así un segmento no puede
+ * desincronizarse de la pantalla, y agregar un filtro nuevo no obliga a migrar los
+ * segmentos que ya existen. La lista blanca está porque lo guardado se vuelve a
+ * pegar en una URL: sin ella, cualquiera podría dejar basura en el link de todos.
+ */
+const SEGMENT_KEYS = [
+  "q",
+  "portfolio",
+  "priority",
+  "status",
+  "assigned",
+  "tramo",
+  "product",
+] as const;
+
+const segmentSchema = z.object({
+  name: z.string().trim().min(1).max(60),
+  // partialRecord y no record: en Zod 4 un record con claves de enum las exige
+  // todas, así que guardar un segmento con un solo filtro habría sido rechazado.
+  filters: z
+    .partialRecord(z.enum(SEGMENT_KEYS), z.string().trim().max(120))
+    .refine((value) => Object.values(value).some(Boolean), {
+      message: "un segmento sin ningún filtro es la lista completa",
+    }),
+});
+
+export type SegmentResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Guarda los filtros actuales con un nombre.
+ *
+ * Es de la organización, no del usuario: el sentido de un segmento es que el
+ * supervisor arme "Legal sin asignar" una vez y todo el equipo trabaje sobre la
+ * misma definición. Por eso tampoco lo puede crear un operador.
+ */
+export async function saveSegment(
+  input: z.infer<typeof segmentSchema>,
+): Promise<SegmentResult> {
+  const session = await requireSession();
+
+  if (session.user.role === "OPERATOR") {
+    return { ok: false, error: "Solo un supervisor puede guardar segmentos." };
+  }
+
+  const parsed = segmentSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "Datos inválidos.",
+    };
+  }
+
+  const { name, filters } = parsed.data;
+  // Las claves vacías no se guardan: ensucian el link y hacen que dos segmentos
+  // iguales se vean distintos.
+  const limpios = Object.fromEntries(
+    Object.entries(filters).filter(([, value]) => value),
+  );
+
+  try {
+    await prisma.segment.upsert({
+      where: {
+        organizationId_name: { organizationId: session.organization.id, name },
+      },
+      create: {
+        organizationId: session.organization.id,
+        name,
+        filters: limpios,
+        createdById: session.user.id,
+      },
+      // Guardar con un nombre que ya existe lo actualiza. Es lo que espera quien
+      // ajusta un filtro y lo vuelve a guardar igual.
+      update: { filters: limpios, createdById: session.user.id },
+    });
+  } catch {
+    return { ok: false, error: "No se pudo guardar el segmento." };
+  }
+
+  revalidatePath("/clients");
+  return { ok: true };
+}
+
+export async function deleteSegment(id: string): Promise<SegmentResult> {
+  const session = await requireSession();
+
+  if (session.user.role === "OPERATOR") {
+    return { ok: false, error: "Solo un supervisor puede borrar segmentos." };
+  }
+  if (!z.string().uuid().safeParse(id).success) {
+    return { ok: false, error: "Segmento inválido." };
+  }
+
+  // deleteMany con el organizationId en el where: un delete por id solo borraría
+  // igual, pero dejaría que una organización toque el segmento de otra.
+  const { count } = await prisma.segment.deleteMany({
+    where: { id, organizationId: session.organization.id },
+  });
+  if (count === 0) return { ok: false, error: "No se encontró el segmento." };
+
+  revalidatePath("/clients");
+  return { ok: true };
+}

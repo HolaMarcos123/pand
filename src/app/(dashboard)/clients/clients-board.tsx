@@ -1,7 +1,16 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Loader2, Search, Shuffle, UserPlus } from "lucide-react";
+import {
+  Bookmark,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Search,
+  Shuffle,
+  UserPlus,
+  X,
+} from "lucide-react";
 import { useCallback, useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -18,9 +27,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { assignClients, distributeClients } from "@/lib/clients/actions";
+import {
+  assignClients,
+  deleteSegment,
+  distributeClients,
+  saveSegment,
+} from "@/lib/clients/actions";
+import { TRAMOS_ACTIVOS, TRAMO_LABELS } from "@/lib/collections/tramos";
 import { formatCurrency, formatNumber } from "@/lib/format";
-import type { ClientListResult } from "@/lib/queries/clients";
+import type { ClientListResult, SegmentRow } from "@/lib/queries/clients";
 import { cn } from "@/lib/utils";
 import type { ClientPriority, ClientStatus } from "@/generated/prisma/enums";
 
@@ -58,6 +73,8 @@ export function ClientsBoard({
   result,
   portfolios,
   operators,
+  products,
+  segments,
   currency,
   canAssign,
   canSeeScore,
@@ -66,6 +83,8 @@ export function ClientsBoard({
   result: ClientListResult;
   portfolios: { id: string; name: string }[];
   operators: { id: string; fullName: string; role: string }[];
+  products: string[];
+  segments: SegmentRow[];
   currency: string;
   canAssign: boolean;
   canSeeScore: boolean;
@@ -75,6 +94,8 @@ export function ClientsBoard({
     priority: string;
     status: string;
     assigned: string;
+    tramo: string;
+    product: string;
   };
 }) {
   const router = useRouter();
@@ -85,6 +106,50 @@ export function ClientsBoard({
   const [assignTo, setAssignTo] = useState<string>("");
   const [saving, startSaving] = useTransition();
   const [query, setQuery] = useState(filters.q);
+  const [segmentName, setSegmentName] = useState("");
+  const [savingSegment, setSavingSegment] = useState(false);
+
+  // Un segmento es el conjunto de filtros activos. Si no hay ninguno, no hay nada
+  // que guardar: sería un atajo a la lista completa.
+  const hayFiltros = Object.entries(filters).some(
+    ([key, value]) => key !== "q" ? Boolean(value) : Boolean(value.trim()),
+  );
+
+  function aplicarSegmento(segment: SegmentRow) {
+    const params = new URLSearchParams(segment.filters);
+    router.push(`/clients?${params.toString()}`);
+  }
+
+  function guardarSegmento() {
+    const name = segmentName.trim();
+    if (!name) return;
+
+    setSavingSegment(true);
+    startSaving(async () => {
+      const outcome = await saveSegment({ name, filters });
+      setSavingSegment(false);
+
+      if (!outcome.ok) {
+        toast.error(outcome.error);
+        return;
+      }
+      setSegmentName("");
+      toast.success(`Segmento «${name}» guardado.`);
+      router.refresh();
+    });
+  }
+
+  function borrarSegmento(segment: SegmentRow) {
+    startSaving(async () => {
+      const outcome = await deleteSegment(segment.id);
+      if (!outcome.ok) {
+        toast.error(outcome.error);
+        return;
+      }
+      toast.success(`Segmento «${segment.name}» borrado.`);
+      router.refresh();
+    });
+  }
 
   const allOnPageSelected =
     result.rows.length > 0 && result.rows.every((r) => selected.has(r.id));
@@ -199,6 +264,65 @@ export function ClientsBoard({
         )}
       </div>
 
+      {/* ── Segmentos ──────────────────────────────────────── */}
+      {(segments.length > 0 || (canAssign && hayFiltros)) && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Bookmark className="h-4 w-4 shrink-0 text-pand-gris" />
+
+          {segments.map((segment) => (
+            <span
+              key={segment.id}
+              className="group flex items-center rounded-badge border border-pand-border bg-white"
+            >
+              <button
+                type="button"
+                onClick={() => aplicarSegmento(segment)}
+                className="px-3 py-1.5 text-xs font-semibold text-pand-contorno hover:text-pand-azul"
+              >
+                {segment.name}
+              </button>
+              {canAssign && (
+                <button
+                  type="button"
+                  aria-label={`Borrar segmento ${segment.name}`}
+                  disabled={saving}
+                  onClick={() => borrarSegmento(segment)}
+                  className="pr-2 text-pand-gris opacity-0 transition-opacity hover:text-pand-coral group-hover:opacity-100"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </span>
+          ))}
+
+          {canAssign && hayFiltros && (
+            <span className="flex items-center gap-1.5">
+              <Input
+                value={segmentName}
+                onChange={(event) => setSegmentName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    guardarSegmento();
+                  }
+                }}
+                placeholder="Guardar estos filtros como…"
+                className="h-8 w-[220px] text-xs"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8"
+                disabled={!segmentName.trim() || savingSegment}
+                onClick={guardarSegmento}
+              >
+                Guardar
+              </Button>
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ── Búsqueda y filtros ─────────────────────────────── */}
       <div className="flex flex-wrap gap-3">
         <form
@@ -258,6 +382,38 @@ export function ClientsBoard({
             </option>
           ))}
         </NativeSelect>
+
+        <NativeSelect
+          aria-label="Tramo de mora"
+          className="w-auto"
+          value={filters.tramo}
+          onChange={(event) => setParam({ tramo: event.target.value })}
+        >
+          <option value="">Todo tramo</option>
+          {TRAMOS_ACTIVOS.map((t) => (
+            <option key={t} value={t}>
+              {TRAMO_LABELS[t]}
+            </option>
+          ))}
+          {/* Castigo va aparte: no es cartera activa, pero se tiene que poder mirar. */}
+          <option value="CASTIGO">{TRAMO_LABELS.CASTIGO}</option>
+        </NativeSelect>
+
+        {products.length > 0 && (
+          <NativeSelect
+            aria-label="Producto"
+            className="w-auto"
+            value={filters.product}
+            onChange={(event) => setParam({ product: event.target.value })}
+          >
+            <option value="">Todo producto</option>
+            {products.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </NativeSelect>
+        )}
 
         {canAssign && (
           <NativeSelect
@@ -352,8 +508,10 @@ export function ClientsBoard({
                 )}
                 <TableHead className="w-8" />
                 <TableHead>Deudor</TableHead>
+                <TableHead>Producto</TableHead>
                 <TableHead>Cartera</TableHead>
                 <TableHead className="text-right">Deuda</TableHead>
+                <TableHead>Tramo</TableHead>
                 <TableHead className="text-right">Días mora</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead>Operador</TableHead>
@@ -398,12 +556,29 @@ export function ClientsBoard({
                     )}
                   </TableCell>
 
+                  <TableCell className="max-w-[160px] truncate text-sm">
+                    {row.products ?? <span className="text-pand-gris">—</span>}
+                  </TableCell>
+
                   <TableCell className="text-sm text-pand-gris">
                     {row.portfolioName ?? "—"}
                   </TableCell>
 
-                  <TableCell className="mono text-right">
+                  <TableCell className="mono whitespace-nowrap text-right">
                     {formatCurrency(row.totalDebt, currency)}
+                  </TableCell>
+
+                  <TableCell>
+                    <span
+                      className={cn(
+                        "whitespace-nowrap text-xs font-semibold",
+                        row.tramo === "CASTIGO" || row.tramo === "LEGAL"
+                          ? "text-pand-coral"
+                          : "text-pand-gris",
+                      )}
+                    >
+                      {TRAMO_LABELS[row.tramo]}
+                    </span>
                   </TableCell>
 
                   <TableCell
@@ -467,6 +642,7 @@ export function ClientsBoard({
         currency={currency}
         focusManagement={false}
         canSeeScore={canSeeScore}
+        canChangeInvoiceStatus={canAssign}
         onClose={() => setOpenClientId(null)}
         onDone={() => router.refresh()}
       />

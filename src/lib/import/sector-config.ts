@@ -10,6 +10,7 @@ export type FieldKey =
   | "phone"
   | "phoneAlt"
   | "invoiceNumber"
+  | "product"
   | "amount"
   | "dueDate"
   | "description";
@@ -46,6 +47,13 @@ const BASE: FieldDef[] = [
   { key: "phone", label: "Teléfono", type: "text", required: false },
   { key: "phoneAlt", label: "Teléfono alternativo", type: "text", required: false },
   { key: "invoiceNumber", label: "Nro. de comprobante", type: "text", required: true },
+  {
+    key: "product",
+    label: "Producto",
+    type: "text",
+    required: false,
+    hint: "Qué se vendió o prestó. Se filtra y se reporta por acá, así que conviene que venga parejo y no como texto libre.",
+  },
   { key: "amount", label: "Monto", type: "number", required: true },
   { key: "dueDate", label: "Vencimiento", type: "date", required: true },
   { key: "description", label: "Descripción", type: "text", required: false },
@@ -56,6 +64,7 @@ const OVERRIDES: Record<Sector, Partial<Record<FieldKey, string>>> = {
     externalId: "Nro. de cliente",
     documentNumber: "CI / RUC",
     invoiceNumber: "Nro. de préstamo o cuota",
+    product: "Línea de crédito",
     amount: "Monto de la cuota",
   },
   B2B: {
@@ -63,6 +72,7 @@ const OVERRIDES: Record<Sector, Partial<Record<FieldKey, string>>> = {
     name: "Razón social",
     documentNumber: "RUC",
     invoiceNumber: "Nro. de factura",
+    product: "Producto o servicio",
     amount: "Importe",
   },
   TELECOM: {
@@ -70,6 +80,7 @@ const OVERRIDES: Record<Sector, Partial<Record<FieldKey, string>>> = {
     name: "Titular",
     documentNumber: "CI",
     invoiceNumber: "Nro. de línea o factura",
+    product: "Plan",
     amount: "Importe del período",
   },
   RETAIL: {
@@ -77,6 +88,7 @@ const OVERRIDES: Record<Sector, Partial<Record<FieldKey, string>>> = {
     name: "Nombre",
     documentNumber: "CI",
     invoiceNumber: "Nro. de boleta",
+    product: "Artículo",
     amount: "Saldo",
   },
 };
@@ -108,6 +120,7 @@ const ALIASES: Record<FieldKey, string[]> = {
   phone: ["telefono", "tel", "celular", "movil", "phone", "contacto"],
   phoneAlt: ["telefono2", "telalternativo", "telefonoalternativo", "celular2", "otrotelefono"],
   invoiceNumber: ["factura", "nrofactura", "numerofactura", "comprobante", "nrocomprobante", "boleta", "prestamo", "cuota", "nroprestamo", "invoice"],
+  product: ["producto", "articulo", "item", "bien", "linea", "lineacredito", "plan", "servicio", "tipoproducto", "product"],
   amount: ["monto", "importe", "saldo", "deuda", "total", "montocuota", "amount", "valor"],
   dueDate: ["vencimiento", "fechavencimiento", "fechavto", "vto", "duedate", "fecha"],
   description: ["descripcion", "detalle", "concepto", "observacion", "description"],

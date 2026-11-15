@@ -53,6 +53,7 @@ export function TasksBoard({
   currency,
   role,
   canSeeScore,
+  canChangeInvoiceStatus,
   filters,
 }: {
   tasks: TaskRow[];
@@ -60,6 +61,7 @@ export function TasksBoard({
   currency: string;
   role: Role;
   canSeeScore: boolean;
+  canChangeInvoiceStatus: boolean;
   filters: { portfolio: string; priority: string; status: string };
 }) {
   const router = useRouter();
@@ -294,6 +296,7 @@ export function TasksBoard({
         currency={currency}
         focusManagement={focusManagement}
         canSeeScore={canSeeScore}
+        canChangeInvoiceStatus={canChangeInvoiceStatus}
         onClose={() => setOpenClientId(null)}
         onDone={handleDone}
       />

@@ -26,6 +26,8 @@ export const mappedRowSchema = z.object({
   phone: optionalText(40),
   phoneAlt: optionalText(40),
   invoiceNumber: z.string().trim().min(1).max(120),
+  // Corto a propósito: es una categoría para agrupar, no una descripción.
+  product: optionalText(120),
   // Los montos ya llegan normalizados a número por parse-values.
   amount: z.number().finite().min(0).max(1e15),
   // ISO estricto: cualquier ambigüedad de formato se resolvió en el cliente.

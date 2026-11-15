@@ -2,9 +2,12 @@ import type { Metadata } from "next";
 
 import { requireSession } from "@/lib/auth/session";
 import { isFeatureEnabled } from "@/lib/feature-flags";
+import { TRAMO_LABELS, type Tramo } from "@/lib/collections/tramos";
 import {
   getAssignableUsers,
   getClients,
+  getProductOptions,
+  getSegments,
   type ClientFilters,
 } from "@/lib/queries/clients";
 import { getPortfolioOptions } from "@/lib/queries/tasks";
@@ -44,10 +47,14 @@ export default async function ClientsPage({
     filters.status = query.status as ClientStatus;
   }
   if (query.assigned) filters.assigned = query.assigned;
+  // El tramo se valida contra el catálogo y no contra una lista suelta: así un
+  // tramo nuevo queda filtrable sin tocar esta página.
+  if (query.tramo && query.tramo in TRAMO_LABELS) filters.tramo = query.tramo as Tramo;
+  if (query.product) filters.product = query.product.slice(0, 120);
 
   const page = Number.parseInt(query.page ?? "1", 10) || 1;
 
-  const [result, portfolios, operators] = await Promise.all([
+  const [result, portfolios, operators, products, segments] = await Promise.all([
     getClients(
       session.organization.id,
       session.user.id,
@@ -57,6 +64,8 @@ export default async function ClientsPage({
     ),
     getPortfolioOptions(session.organization.id),
     getAssignableUsers(session.organization.id),
+    getProductOptions(session.organization.id),
+    getSegments(session.organization.id),
   ]);
 
   return (
@@ -64,6 +73,8 @@ export default async function ClientsPage({
       result={result}
       portfolios={portfolios}
       operators={operators}
+      products={products}
+      segments={segments}
       currency={session.organization.currency}
       // Repartir cartera es de admin y supervisor. El operador ve la pantalla, pero
       // solo su propia cartera y sin poder reasignar.
@@ -75,6 +86,8 @@ export default async function ClientsPage({
         priority: query.priority ?? "",
         status: query.status ?? "",
         assigned: query.assigned ?? "",
+        tramo: query.tramo ?? "",
+        product: query.product ?? "",
       }}
     />
   );

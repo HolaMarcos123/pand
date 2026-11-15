@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 
+import type { InvoiceStatus } from "@/generated/prisma/enums";
+import type { ManualInvoiceStatus } from "@/lib/collections/invoice-status";
 import { requireSession } from "@/lib/auth/session";
 import { PAYMENT_METHOD_VALUES } from "@/lib/import/payment-config";
 import { allocateToInvoices, refreshClientBalance } from "@/lib/payments/apply";
@@ -238,4 +240,66 @@ export async function registerPayment(
   revalidatePath("/portfolio");
 
   return { ok: true, ...result };
+}
+
+const invoiceStatusSchema = z.object({
+  invoiceId: z.string().uuid(),
+  // Solo los que se ponen a mano. PAID y PARTIAL los calcula el sistema a partir
+  // de los cobros: dejarlos acá permitiría marcar como pagado sin registrar plata.
+  status: z.enum(
+    ["PENDING", "REFINANCED", "WRITTEN_OFF", "CANCELLED"] satisfies ManualInvoiceStatus[],
+  ),
+});
+
+/**
+ * Refinancia, castiga, anula o devuelve un comprobante a la cartera activa.
+ *
+ * No lo puede hacer un operador. Castigar una deuda la saca de la cartera activa y
+ * del recupero del que depende su propio número; es una decisión de quien responde
+ * por la cartera.
+ *
+ * Al volver a PENDING el estado real se recalcula contra lo ya cobrado: si tenía
+ * pagos parciales vuelve como PARTIAL y si estaba cubierto vuelve como PAID. Poner
+ * PENDING a secas resucitaría deuda que ya se cobró.
+ */
+export async function setInvoiceStatus(
+  input: z.infer<typeof invoiceStatusSchema>,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const session = await requireSession();
+
+  if (session.user.role === "OPERATOR") {
+    return { ok: false, error: "Solo un supervisor puede cambiar el estado de una deuda." };
+  }
+
+  const parsed = invoiceStatusSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Datos inválidos." };
+
+  const organizationId = session.organization.id;
+
+  const invoice = await prisma.invoice.findFirst({
+    // El filtro por organizationId no es opcional: Prisma corre con BYPASSRLS.
+    where: { id: parsed.data.invoiceId, organizationId },
+    select: { id: true, clientId: true, amount: true, paidAmount: true },
+  });
+  if (!invoice) return { ok: false, error: "No se encontró el comprobante." };
+
+  let status: InvoiceStatus = parsed.data.status;
+  if (status === "PENDING") {
+    const pagado = invoice.paidAmount;
+    if (pagado.greaterThanOrEqualTo(invoice.amount)) status = "PAID";
+    else if (pagado.greaterThan(0)) status = "PARTIAL";
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.invoice.update({ where: { id: invoice.id }, data: { status } });
+    // El saldo del deudor sale de sus comprobantes abiertos: si este dejó de serlo,
+    // el total_debt de clients quedó mintiendo hasta que se recalcule.
+    await refreshClientBalance(tx, organizationId, invoice.clientId);
+  });
+
+  revalidatePath("/clients");
+  revalidatePath("/tasks");
+  revalidatePath("/overview");
+
+  return { ok: true };
 }

@@ -1,9 +1,6 @@
-import {
-  TRAMOS,
-  TRAMO_LABELS,
-  tramoSql,
-  type Tramo,
-} from "@/lib/collections/tramos";
+import { ESTADOS_ABIERTOS } from "@/lib/collections/invoice-status";
+import { TRAMOS, TRAMO_LABELS, type Tramo } from "@/lib/collections/tramos";
+import { tramoSql } from "@/lib/collections/tramos-sql";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -21,9 +18,6 @@ import { prisma } from "@/lib/prisma";
  *      devuelve los numeric como string y los count como BigInt, que ni se suman ni
  *      se serializan hacia un Client Component.
  */
-
-/** Facturas que todavía deben plata. Las pagadas y anuladas no son cartera. */
-const OPEN_INVOICE_STATUSES = ["PENDING", "PARTIAL"] as const;
 
 export type Kpis = {
   recoveredAmount: number;
@@ -60,7 +54,7 @@ export async function getKpis(organizationId: string): Promise<Kpis> {
       SELECT COALESCE(SUM(amount - paid_amount), 0)::float8 AS amount
         FROM invoices
        WHERE organization_id = ${organizationId}::uuid
-         AND status = ANY(${OPEN_INVOICE_STATUSES as unknown as string[]}::"InvoiceStatus"[])
+         AND status = ANY(${ESTADOS_ABIERTOS as unknown as string[]}::"InvoiceStatus"[])
     `,
     prisma.$queryRaw<[{ amount: number; count: number }]>`
       SELECT COALESCE(SUM(promise_amount), 0)::float8 AS amount,
@@ -74,7 +68,7 @@ export async function getKpis(organizationId: string): Promise<Kpis> {
       SELECT COALESCE(SUM(amount - paid_amount), 0)::float8 AS amount
         FROM invoices
        WHERE organization_id = ${organizationId}::uuid
-         AND status = ANY(${OPEN_INVOICE_STATUSES as unknown as string[]}::"InvoiceStatus"[])
+         AND status = ANY(${ESTADOS_ABIERTOS as unknown as string[]}::"InvoiceStatus"[])
          AND days_overdue > 90
     `,
     // Castigado: fuera de la cartera activa. Se mide aparte justamente para no
@@ -120,7 +114,7 @@ export async function getTranches(organizationId: string): Promise<Tranche[]> {
            COALESCE(SUM(i.amount - i.paid_amount), 0)::float8 AS amount
       FROM invoices i
      WHERE i.organization_id = ${organizationId}::uuid
-       AND i.status = ANY(${OPEN_INVOICE_STATUSES as unknown as string[]}::"InvoiceStatus"[])
+       AND i.status = ANY(${ESTADOS_ABIERTOS as unknown as string[]}::"InvoiceStatus"[])
      GROUP BY 1
   `;
 

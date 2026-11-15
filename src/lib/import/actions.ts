@@ -133,6 +133,7 @@ export async function importBatch(input: {
           organizationId,
           clientId: client.id,
           invoiceNumber: row.invoiceNumber,
+          product: row.product,
           description: row.description,
           amount: row.amount,
           currency,
@@ -140,6 +141,7 @@ export async function importBatch(input: {
         },
         update: {
           clientId: client.id,
+          product: row.product,
           description: row.description,
           amount: row.amount,
           dueDate: new Date(`${row.dueDate}T00:00:00Z`),

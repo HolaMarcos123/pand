@@ -119,6 +119,7 @@ export type ClientDetail = {
   invoices: {
     id: string;
     invoiceNumber: string;
+    product: string | null;
     description: string | null;
     amount: number;
     paidAmount: number;
@@ -164,6 +165,7 @@ export async function getClientDetail(
         select: {
           id: true,
           invoiceNumber: true,
+          product: true,
           description: true,
           amount: true,
           paidAmount: true,
@@ -211,6 +213,7 @@ export async function getClientDetail(
     invoices: client.invoices.map((invoice) => ({
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
+      product: invoice.product,
       description: invoice.description,
       amount: Number(invoice.amount),
       paidAmount: Number(invoice.paidAmount),
