@@ -32,9 +32,9 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -42,6 +42,14 @@ jobs:
       # npm ci y no npm install: instala exactamente lo del package-lock, así que
       # una dependencia que cambió sin querer se nota acá.
       - run: npm ci
+
+      # next-env.d.ts está gitignorado y es el que declara los tipos de los
+      # imports de imágenes y de las rutas. En local existe porque lo deja el
+      # último `next dev` o `next build`; en CI el repo llega sin él y `tsc` se
+      # cae con "Cannot find module '…/logo.png'". typegen lo regenera sin tener
+      # que hacer un build entero.
+      - name: Generar tipos de Next
+        run: npx next typegen
 
       - name: Tipos
         run: npx tsc --noEmit
@@ -67,9 +75,9 @@ jobs:
     if: github.event_name != 'pull_request'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
