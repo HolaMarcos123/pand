@@ -19,7 +19,7 @@ import { ACTION_TYPE_LABELS, toWhatsappNumber } from "@/lib/tasks/action-config"
 import { cn } from "@/lib/utils";
 import type { ActionType, ClientPriority, Role } from "@/generated/prisma/enums";
 
-import { ClientSheet } from "./client-sheet";
+import { ClientSheet } from "@/components/clients/client-sheet";
 
 /** Bullet de prioridad. Los colores salen del manual de marca. */
 const PRIORITY_DOT: Record<ClientPriority, string> = {

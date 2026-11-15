@@ -253,6 +253,47 @@ directamente. La pantalla y el link del login son presentacion.
 `/register` y `/login` se resuelven por request (`force-dynamic`), asi que abrir o
 cerrar el alta es cambiar la variable y redesplegar, sin reconstruir.
 
+## Clientes y asignacion
+
+`/clients`. Listado con busqueda (nombre, documento, ID externo), filtros por cartera,
+prioridad, estado y operador, y **paginacion real** (LIMIT/OFFSET + COUNT aparte): una
+cartera importada puede tener decenas de miles de filas y esta es justo la pantalla
+que se abre despues de importar.
+
+### Por que la asignacion era bloqueante
+
+El importador no escribe `assigned_to` y hasta ahora no habia forma de asignar. La
+bandeja filtra por operador, asi que **la bandeja de un operador estaba vacia para
+siempre**: se podian importar 5.000 deudores y nadie podia trabajarlos.
+
+Dos caminos, ambos de admin o supervisor:
+
+- **Asignacion puntual:** seleccion multiple en la tabla y "Asignar a".
+- **Reparto automatico:** round-robin por deuda descendente. El orden importa:
+  rotando operadores sobre una lista ordenada por monto, cada uno recibe una mezcla
+  pareja de casos grandes y chicos. Al azar, alguien se queda con toda la cartera
+  pesada; en bloques, peor. Va en un solo SQL porque fila por fila desde Node seria
+  una tormenta de queries.
+
+El destinatario se valida contra la organizacion antes de escribir, y el `updateMany`
+tambien filtra por `organizationId`: los ids llegan del cliente y Prisma corre con
+BYPASSRLS.
+
+## Seed de demostracion
+
+`npm run seed` genera "Financiera Pand Demo": 7 usuarios, 2 carteras, 200 deudores ya
+repartidos entre los operadores, ~450 comprobantes, gestiones, promesas y cobros.
+
+**Todas las fechas son relativas al dia de ejecucion.** Un seed con fechas fijas se
+pudre: a los dos meses el recupero del mes es cero y toda la cartera cae en +90 — que
+es exactamente lo que le paso a los datos de prueba anteriores. El generador usa
+semilla fija, asi que dos corridas producen la misma cartera.
+
+Borra y recrea la organizacion por su slug: es seguro correrlo muchas veces y no toca
+ninguna otra organizacion.
+
+    admin@pand.demo · supervisor1@pand.demo · operador1@pand.demo … / PandDemo2026!
+
 ## Design system
 
 Los 7 tokens de marca viven en `tailwind.config.ts` bajo `colors.pand.*`

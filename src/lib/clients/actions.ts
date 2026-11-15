@@ -1,0 +1,141 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+
+import { requireSession } from "@/lib/auth/session";
+import { prisma } from "@/lib/prisma";
+
+export type AssignResult =
+  | { ok: true; assigned: number }
+  | { ok: false; error: string };
+
+const assignSchema = z.object({
+  clientIds: z.array(z.string().uuid()).min(1).max(500),
+  /** null desasigna. */
+  operatorId: z.string().uuid().nullable(),
+});
+
+/**
+ * Asigna (o desasigna) deudores a un operador.
+ *
+ * Sin esto la bandeja de un operador está vacía para siempre: el importador no
+ * escribe `assigned_to`, así que una cartera recién importada no es trabajable por
+ * nadie hasta que alguien reparta.
+ *
+ * Los operadores no reparten: solo administradores y supervisores, como define la
+ * matriz de permisos («Asignar operadores a clientes: Admin ✅ Supervisor ✅»).
+ */
+export async function assignClients(
+  input: z.infer<typeof assignSchema>,
+): Promise<AssignResult> {
+  const session = await requireSession();
+
+  if (session.user.role === "OPERATOR") {
+    return { ok: false, error: "Solo un administrador o supervisor puede asignar." };
+  }
+
+  const parsed = assignSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Selección inválida." };
+
+  const { clientIds, operatorId } = parsed.data;
+  const organizationId = session.organization.id;
+
+  // El destinatario tiene que ser de esta organización. Sin este chequeo se podría
+  // asignar cartera a un usuario de otro tenant: Prisma corre con BYPASSRLS.
+  if (operatorId) {
+    const target = await prisma.user.findFirst({
+      where: { id: operatorId, organizationId, isActive: true },
+      select: { id: true },
+    });
+    if (!target) {
+      return { ok: false, error: "Ese usuario no existe o no está activo." };
+    }
+  }
+
+  // updateMany con el filtro de organización: los ids vienen del cliente y no se
+  // confía en ellos. Los que no sean del tenant simplemente no entran en el UPDATE.
+  const result = await prisma.client.updateMany({
+    where: { id: { in: clientIds }, organizationId },
+    data: { assignedToId: operatorId },
+  });
+
+  revalidatePath("/clients");
+  revalidatePath("/tasks");
+
+  return { ok: true, assigned: result.count };
+}
+
+const distributeSchema = z.object({
+  operatorIds: z.array(z.string().uuid()).min(1).max(50),
+  /** Limitar el reparto a una cartera; sin esto, toda la organización. */
+  portfolioId: z.string().uuid().nullable(),
+  /** Incluir también los que ya tienen operador (reasignar todo). */
+  includeAssigned: z.boolean(),
+});
+
+/**
+ * Reparte deudores entre varios operadores, en round-robin por deuda descendente.
+ *
+ * El orden importa: repartir ordenando por deuda y rotando operadores le da a cada
+ * uno una mezcla pareja de casos grandes y chicos. Repartir al azar deja a alguien
+ * con toda la cartera pesada, y repartir en bloques, peor todavía.
+ *
+ * Va en SQL de una sola pasada porque una cartera importada puede tener decenas de
+ * miles de filas y hacerlo fila por fila desde Node sería una tormenta de queries.
+ */
+export async function distributeClients(
+  input: z.infer<typeof distributeSchema>,
+): Promise<AssignResult> {
+  const session = await requireSession();
+
+  if (session.user.role === "OPERATOR") {
+    return { ok: false, error: "Solo un administrador o supervisor puede repartir." };
+  }
+
+  const parsed = distributeSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Datos de reparto inválidos." };
+
+  const { operatorIds, portfolioId, includeAssigned } = parsed.data;
+  const organizationId = session.organization.id;
+
+  // Todos los destinatarios tienen que ser de esta organización y estar activos.
+  const valid = await prisma.user.findMany({
+    where: { id: { in: operatorIds }, organizationId, isActive: true },
+    select: { id: true },
+  });
+
+  if (valid.length !== operatorIds.length) {
+    return { ok: false, error: "Alguno de los usuarios elegidos no es válido." };
+  }
+
+  const ids = valid.map((u) => u.id);
+
+  const assigned = await prisma.$executeRaw`
+    WITH elegibles AS (
+      SELECT c.id,
+             row_number() OVER (ORDER BY c.total_debt DESC, c.id) - 1 AS rn
+        FROM clients c
+       WHERE c.organization_id = ${organizationId}::uuid
+         -- Un deudor pagado o perdido no se trabaja, no tiene sentido repartirlo.
+         AND c.status NOT IN ('PAID', 'LOST')
+         AND (${includeAssigned}::boolean OR c.assigned_to IS NULL)
+         AND (${portfolioId}::uuid IS NULL OR c.portfolio_id = ${portfolioId}::uuid)
+    ),
+    operadores AS (
+      SELECT id, (ord - 1) AS slot
+        FROM unnest(${ids}::uuid[]) WITH ORDINALITY AS t(id, ord)
+    )
+    UPDATE clients c
+       SET assigned_to = o.id,
+           updated_at  = now()
+      FROM elegibles e
+      JOIN operadores o ON o.slot = e.rn % ${ids.length}
+     WHERE c.id = e.id
+  `;
+
+  revalidatePath("/clients");
+  revalidatePath("/tasks");
+
+  return { ok: true, assigned };
+}
