@@ -317,6 +317,56 @@ Los tokens semánticos de shadcn/ui (`primary`, `destructive`, `muted`…) está
 mapeados a esta paleta, así que los componentes salen con la marca puesta sin
 tocarlos.
 
+## Tests y CI
+
+Dos suites, separadas a propósito.
+
+```bash
+npm test        # lógica pura, sin base ni red. Segundos.
+npm run test:db # contra la base real. Un minuto.
+```
+
+`npm test` cubre lo que no necesita base: los bordes de los tramos, el parseo de
+medios de pago, los alias del importador, el formateo de fechas y montos, y la
+validación de filas del importador. Es lo que corre CI en cada push.
+
+`npm run test:db` prueba las consultas de verdad contra Supabase, con las
+credenciales de `.env.local`. **Cada test se crea su propia organización con un
+slug `test-…` y la borra al terminar**, así que no toca la demo ni ninguna cartera
+real, y se puede correr las veces que haga falta. Si una corrida se interrumpe a
+la mitad puede quedar una organización huérfana: se limpian borrando las
+organizaciones cuyo slug empieza con `test-`.
+
+Lo que prueba, y por qué importa:
+
+- **Tramos.** Que la expresión SQL que filtra y la función de TypeScript que pinta
+  la columna digan lo mismo, y que los tramos particionen la cartera sin huecos ni
+  solapamientos.
+- **Promesas.** Que el cumplimiento no pase del 100 % cuando alguien paga de más,
+  que las vigentes no entren en el divisor, y que reprometer para la misma fecha no
+  multiplique el monto prometido.
+- **Cobros.** FIFO, comprobantes elegidos a mano, sobrante devuelto, y que un cobro
+  no toque deuda castigada o refinanciada.
+- **Aislamiento entre organizaciones.** El más importante. Prisma se conecta como
+  `postgres`, que tiene **BYPASSRLS**: las policies no corren para las consultas de
+  la app, y lo único que separa a un cliente de otro es el `organization_id`
+  escrito a mano en cada consulta. Un `WHERE` olvidado no lo ataja nada. Por eso
+  cada consulta se prueba contra una segunda organización **con datos propios y más
+  grandes**, no contra una vacía: una consulta mal filtrada devuelve las dos
+  carteras, y contra una base vacía eso no se nota.
+
+### CI
+
+`.github/workflows/ci.yml` corre en cada push a `main` y en cada pull request:
+tipos, lint, tests de lógica y build. El build va último porque encuentra cosas
+que `tsc` no ve — un componente cliente que arrastra código de servidor al bundle
+del browser, por ejemplo, solo se cae ahí.
+
+Los tests contra la base van en un job aparte y solo corren si está configurado el
+secreto `TEST_DATABASE_URL` (Settings → Secrets and variables → Actions). Sin el
+secreto el job se saltea en vez de fallar en rojo. Conviene apuntarlo a un
+proyecto de Supabase que no sea el de producción.
+
 ## Secretos
 
 `.env.local` es la única fuente de verdad y está gitignorado. `prisma.config.ts`
@@ -325,8 +375,11 @@ lo carga vía dotenv, así que el CLI de Prisma y la app leen las mismas variabl
 
 ## Deuda conocida
 
-- `npm audit` reporta CVEs que solo se resuelven subiendo a Next 16 y Prisma 6+.
-  Ver notas del scaffold.
+- **Sin tests de interfaz.** Las suites cubren consultas y lógica, no lo que pasa
+  al hacer clic. El flujo de pantalla se sigue verificando a mano contra el build
+  de producción.
+- Tailwind sigue en v3.4. No tiene CVE: subir a v4 es riesgo visual, no de
+  seguridad, así que va aparte.
 
 ### Pendiente del P02
 

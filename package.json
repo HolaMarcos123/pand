@@ -7,6 +7,8 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint .",
+    "test": "vitest run",
+    "test:db": "vitest run --config vitest.db.config.ts",
     "postinstall": "prisma generate",
     "seed": "tsx prisma/seed.ts"
   },
@@ -59,6 +61,7 @@
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.23.15",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   }
 }

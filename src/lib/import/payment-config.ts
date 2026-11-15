@@ -149,9 +149,14 @@ export function parsePaymentMethod(raw: unknown): PaymentMethod {
 
   if (/(efectivo|cash|contado)/.test(value)) return "CASH";
   if (/(transf|spi|giro|wire|banco)/.test(value)) return "BANK_TRANSFER";
-  if (/(tarjeta|card|credito|debito|pos)/.test(value)) return "CARD";
-  if (/(cheque|check)/.test(value)) return "CHECK";
+  // Depósito va ANTES que tarjeta: "deposito" contiene "pos", y con la regla de
+  // tarjeta primero todo depósito bancario entraba al sistema como pago con
+  // tarjeta. El reporte de recupero por método quedaba mintiendo en silencio.
   if (/(deposito|deposit)/.test(value)) return "DEPOSIT";
+  // "pos" suelto es demasiado corto para buscarlo adentro de una palabra: solo
+  // vale como palabra entera o en "posnet".
+  if (/(tarjeta|card|credito|debito|posnet|^pos$)/.test(value)) return "CARD";
+  if (/(cheque|check)/.test(value)) return "CHECK";
 
   return "OTHER";
 }
