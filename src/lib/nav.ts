@@ -46,7 +46,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/admin/users", label: "Usuarios", icon: Users },
     { href: "/reports", label: "Reportes", icon: BarChart3 },
     { href: "/ai-agent", label: "IA", icon: Bot, comingSoon: true },
-    { href: "/admin/settings", label: "Config", icon: Settings, comingSoon: true },
+    { href: "/admin/settings", label: "Config", icon: Settings },
   ],
   SUPERVISOR: [
     { href: "/overview", label: "Overview", icon: LayoutDashboard },

@@ -80,6 +80,7 @@ export default async function ClientsPage({
       // solo su propia cartera y sin poder reasignar.
       canAssign={session.user.role !== "OPERATOR"}
       canSeeScore={isFeatureEnabled("ai_agent", session.organization.plan)}
+      tipificaciones={session.organization.tipificaciones}
       filters={{
         q: query.q ?? "",
         portfolio: query.portfolio ?? "",

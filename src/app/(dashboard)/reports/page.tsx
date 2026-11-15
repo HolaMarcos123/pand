@@ -32,7 +32,7 @@ import {
   todayInParaguay,
   type Period,
 } from "@/lib/queries/reports";
-import { ACTION_TYPE_LABELS } from "@/lib/tasks/action-config";
+import { labelTipo } from "@/lib/config/settings";
 
 export const metadata: Metadata = {
   title: "Reportes",
@@ -264,7 +264,7 @@ export default async function ReportsPage({
                     className={index % 2 === 1 ? "bg-pand-bg" : undefined}
                   >
                     <TableCell className="font-semibold">
-                      {ACTION_TYPE_LABELS[row.channel]}
+                      {labelTipo(session.organization.tipificaciones, row.channel)}
                     </TableCell>
                     <TableCell className="mono text-right">
                       {formatNumber(row.attempts)}

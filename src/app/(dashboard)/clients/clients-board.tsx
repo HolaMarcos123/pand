@@ -34,6 +34,7 @@ import {
   saveSegment,
 } from "@/lib/clients/actions";
 import { TRAMOS_ACTIVOS, TRAMO_LABELS } from "@/lib/collections/tramos";
+import type { Tipificaciones } from "@/lib/config/settings";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import type { ClientListResult, SegmentRow } from "@/lib/queries/clients";
 import { cn } from "@/lib/utils";
@@ -78,6 +79,7 @@ export function ClientsBoard({
   currency,
   canAssign,
   canSeeScore,
+  tipificaciones,
   filters,
 }: {
   result: ClientListResult;
@@ -88,6 +90,7 @@ export function ClientsBoard({
   currency: string;
   canAssign: boolean;
   canSeeScore: boolean;
+  tipificaciones: Tipificaciones;
   filters: {
     q: string;
     portfolio: string;
@@ -643,6 +646,7 @@ export function ClientsBoard({
         focusManagement={false}
         canSeeScore={canSeeScore}
         canChangeInvoiceStatus={canAssign}
+        tipificaciones={tipificaciones}
         onClose={() => setOpenClientId(null)}
         onDone={() => router.refresh()}
       />

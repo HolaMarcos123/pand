@@ -26,12 +26,13 @@ import {
 import { formatCurrency, formatNumber } from "@/lib/format";
 import type { ClientDetail } from "@/lib/queries/tasks";
 import {
-  ACTION_RESULT_LABELS,
-  ACTION_TYPE_LABELS,
-  MANUAL_ACTION_TYPES,
-  RESULTS_BY_TYPE,
-  toWhatsappNumber,
-} from "@/lib/tasks/action-config";
+  labelResultado,
+  labelTipo,
+  resultadosDe,
+  tiposCargables,
+  type Tipificaciones,
+} from "@/lib/config/settings";
+import { toWhatsappNumber } from "@/lib/tasks/action-config";
 import {
   loadClientDetail,
   saveManagementAction,
@@ -69,6 +70,7 @@ export function ClientSheet({
   focusManagement,
   canSeeScore,
   canChangeInvoiceStatus,
+  tipificaciones,
   onClose,
   onDone,
 }: {
@@ -78,6 +80,8 @@ export function ClientSheet({
   canSeeScore: boolean;
   /** Refinanciar y castigar saca deuda de la cartera: no es del operador. */
   canChangeInvoiceStatus: boolean;
+  /** Cómo llama esta organización a cada gestión y a cada resultado. */
+  tipificaciones: Tipificaciones;
   onClose: () => void;
   onDone: (clientId: string, leftInbox: boolean) => void;
 }) {
@@ -88,7 +92,9 @@ export function ClientSheet({
   const [changingInvoice, setChangingInvoice] = useState<string | null>(null);
 
   // Formulario de gestión
-  const [actionType, setActionType] = useState<ActionType>("CALL");
+  const [actionType, setActionType] = useState<ActionType>(
+    () => tiposCargables(tipificaciones)[0]?.tipo ?? "NOTE",
+  );
   const [result, setResult] = useState<ActionResult | "">("");
   const [comment, setComment] = useState("");
   const [nextActionAt, setNextActionAt] = useState("");
@@ -134,7 +140,8 @@ export function ClientSheet({
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [clientId]);
 
-  const availableResults = RESULTS_BY_TYPE[actionType];
+  const tiposDisponibles = tiposCargables(tipificaciones);
+  const availableResults = resultadosDe(tipificaciones, actionType);
   const isPromise = result === "PROMISE_PAY";
 
   function cambiarEstado(invoiceId: string, status: ManualInvoiceStatus) {
@@ -414,11 +421,11 @@ export function ClientSheet({
                       >
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm font-semibold">
-                            {ACTION_TYPE_LABELS[entry.actionType as ActionType]}
+                            {labelTipo(tipificaciones, entry.actionType)}
                           </span>
                           {entry.result && (
                             <Badge className="bg-pand-bg text-pand-gris hover:bg-pand-bg">
-                              {ACTION_RESULT_LABELS[entry.result as ActionResult]}
+                              {labelResultado(tipificaciones, entry.result)}
                             </Badge>
                           )}
                           <span className="mono text-xs text-pand-gris">
@@ -473,9 +480,9 @@ export function ClientSheet({
                       setResult("");
                     }}
                   >
-                    {MANUAL_ACTION_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {ACTION_TYPE_LABELS[type]}
+                    {tiposDisponibles.map((tipo) => (
+                      <option key={tipo.tipo} value={tipo.tipo}>
+                        {tipo.label}
                       </option>
                     ))}
                   </NativeSelect>
@@ -498,7 +505,7 @@ export function ClientSheet({
                     </option>
                     {availableResults.map((option) => (
                       <option key={option} value={option}>
-                        {ACTION_RESULT_LABELS[option]}
+                        {labelResultado(tipificaciones, option)}
                       </option>
                     ))}
                   </NativeSelect>

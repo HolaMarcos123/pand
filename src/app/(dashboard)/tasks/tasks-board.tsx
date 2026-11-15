@@ -15,9 +15,10 @@ import {
 } from "@/components/ui/table";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import type { TaskRow } from "@/lib/queries/tasks";
-import { ACTION_TYPE_LABELS, toWhatsappNumber } from "@/lib/tasks/action-config";
+import { labelTipo, type Tipificaciones } from "@/lib/config/settings";
+import { toWhatsappNumber } from "@/lib/tasks/action-config";
 import { cn } from "@/lib/utils";
-import type { ActionType, ClientPriority, Role } from "@/generated/prisma/enums";
+import type { ClientPriority, Role } from "@/generated/prisma/enums";
 
 import { ClientSheet } from "@/components/clients/client-sheet";
 
@@ -53,6 +54,7 @@ export function TasksBoard({
   currency,
   role,
   canSeeScore,
+  tipificaciones,
   canChangeInvoiceStatus,
   filters,
 }: {
@@ -61,6 +63,7 @@ export function TasksBoard({
   currency: string;
   role: Role;
   canSeeScore: boolean;
+  tipificaciones: Tipificaciones;
   canChangeInvoiceStatus: boolean;
   filters: { portfolio: string; priority: string; status: string };
 }) {
@@ -231,7 +234,7 @@ export function TasksBoard({
                         <span className="mono">{task.lastContactAt}</span>
                         {task.lastActionType && (
                           <span className="ml-2">
-                            {ACTION_TYPE_LABELS[task.lastActionType as ActionType]}
+                            {labelTipo(tipificaciones, task.lastActionType)}
                           </span>
                         )}
                       </>
@@ -297,6 +300,7 @@ export function TasksBoard({
         focusManagement={focusManagement}
         canSeeScore={canSeeScore}
         canChangeInvoiceStatus={canChangeInvoiceStatus}
+        tipificaciones={tipificaciones}
         onClose={() => setOpenClientId(null)}
         onDone={handleDone}
       />

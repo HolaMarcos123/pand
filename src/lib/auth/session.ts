@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cache } from "react";
 
+import { resolverSettings, type Tipificaciones } from "@/lib/config/settings";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
 import type { Plan, Role, Sector } from "@/generated/prisma/enums";
@@ -21,18 +22,24 @@ export type SessionData = {
     plan: Plan;
     trialEnds: Date | null;
     isOnboarded: boolean;
-    /** Sale de settings.currency, que es Json y no garantiza la clave. */
+    /** Atajo a settings.currency, que es el que usa casi toda la UI. */
     currency: string;
+    /**
+     * Las tipificaciones resueltas: las necesitan la bandeja, la ficha del deudor
+     * y los reportes, y la sesión ya trae la fila de la organización.
+     *
+     * Va este campo y NO la configuración entera, a propósito. El layout le pasa
+     * la sesión completa al AuthProvider, que es un componente cliente: todo lo
+     * que se agregue acá termina serializado en el HTML de todas las pantallas,
+     * para todos los roles. Las etiquetas no tienen problema en estar ahí. Las
+     * tasas de interés, los objetivos de cobro y sobre todo las credenciales de
+     * integraciones que va a guardar Configuración, sí.
+     *
+     * Lo que necesite el resto de la configuración, que la lea del servidor.
+     */
+    tipificaciones: Tipificaciones;
   };
 };
-
-function currencyOf(settings: unknown): string {
-  if (settings && typeof settings === "object") {
-    const value = (settings as Record<string, unknown>).currency;
-    if (typeof value === "string") return value;
-  }
-  return "PYG";
-}
 
 /**
  * Sesion completa: el usuario de Supabase Auth cruzado con su fila en `users` y la
@@ -59,6 +66,8 @@ export const getSession = cache(async (): Promise<SessionData | null> => {
   // si no hubiera sesion.
   if (!dbUser || !dbUser.isActive) return null;
 
+  const settings = resolverSettings(dbUser.organization.settings);
+
   return {
     user: {
       id: dbUser.id,
@@ -75,7 +84,8 @@ export const getSession = cache(async (): Promise<SessionData | null> => {
       plan: dbUser.organization.plan,
       trialEnds: dbUser.organization.trialEnds,
       isOnboarded: dbUser.organization.isOnboarded,
-      currency: currencyOf(dbUser.organization.settings),
+      currency: settings.currency,
+      tipificaciones: settings.tipificaciones,
     },
   };
 });

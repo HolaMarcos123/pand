@@ -67,6 +67,7 @@ export default async function TasksPage({
       // puede usar <PlanGuard>, que es servidor.
       canSeeScore={isFeatureEnabled("ai_agent", session.organization.plan)}
       canChangeInvoiceStatus={session.user.role !== "OPERATOR"}
+      tipificaciones={session.organization.tipificaciones}
       filters={{
         portfolio: query.portfolio ?? "",
         priority: query.priority ?? "",

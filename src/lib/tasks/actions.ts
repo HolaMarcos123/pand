@@ -11,7 +11,7 @@ import { PAYMENT_METHOD_VALUES } from "@/lib/import/payment-config";
 import { allocateToInvoices, refreshClientBalance } from "@/lib/payments/apply";
 import { prisma } from "@/lib/prisma";
 import { getClientDetail } from "@/lib/queries/tasks";
-import { RESULTS_BY_TYPE } from "@/lib/tasks/action-config";
+import { resultadosDe } from "@/lib/config/settings";
 
 export type TaskActionResult = { ok: true } | { ok: false; error: string };
 
@@ -88,7 +88,10 @@ export async function saveManagementAction(
   // El resultado tiene que ser uno de los válidos para ese tipo. Sin esto, un POST
   // armado a mano podría dejar "Ocupado" en un email y ensuciar los reportes de
   // efectividad por canal.
-  const allowed = RESULTS_BY_TYPE[data.actionType];
+  // Contra la configuración de la organización, no contra el catálogo completo:
+  // si el administrador apagó un resultado, una pestaña vieja no puede seguir
+  // cargándolo.
+  const allowed = resultadosDe(session.organization.tipificaciones, data.actionType);
   if (data.result && !allowed.includes(data.result)) {
     return { ok: false, error: "Ese resultado no corresponde al tipo de gestión." };
   }
