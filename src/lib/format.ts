@@ -45,9 +45,21 @@ export function formatNumber(value: number): string {
   return new Intl.NumberFormat("es-PY").format(value);
 }
 
+const SOLO_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+
 /** "14 ago 2026" */
 export function formatDate(date: Date | string | null): string {
   if (!date) return "—";
+
+  // Un "2026-10-01" es una fecha de calendario, no un instante. new Date() lo lee
+  // como medianoche UTC y date-fns lo imprime en hora local: en Paraguay (UTC-3) el
+  // 1 de octubre se mostraba como 30 de septiembre. Se arma en hora local para que
+  // el día que se guardó sea el día que se ve.
+  if (typeof date === "string" && SOLO_FECHA.test(date)) {
+    const [year, month, day] = date.split("-").map(Number);
+    return format(new Date(year, month - 1, day), "d MMM yyyy", { locale: es });
+  }
+
   return format(new Date(date), "d MMM yyyy", { locale: es });
 }
 

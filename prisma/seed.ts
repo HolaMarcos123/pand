@@ -334,6 +334,62 @@ async function main() {
         createdAt: dias(-entre(1, 6)),
       });
     }
+
+    // Otro quinto tiene una promesa **ya vencida**, con los tres desenlaces
+    // posibles: cumplida, pagada en parte y rota.
+    //
+    // Sin esto el reporte de cumplimiento de promesas se abre vacío. Todas las
+    // promesas de arriba vencen en el futuro, así que no hay todavía nada que haya
+    // salido bien ni mal, y la pantalla que mide justamente eso no muestra nada.
+    if (rnd() < 0.22) {
+      const prometido = guaranies(500_000, 9_000_000);
+      const vencio = entre(5, 25); // días atrás en que vencía
+      const prometidaEl = vencio + entre(2, 8); // se comprometió antes de la fecha
+      const desenlace = rnd();
+
+      gestiones.push({
+        id: randomUUID(),
+        organizationId,
+        clientId,
+        operatorId: operadores[i % operadores.length].id,
+        actionType: "CALL",
+        result: "PROMISE_PAY",
+        comment: "Se compromete a pagar.",
+        promiseAmount: prometido,
+        promiseDate: dias(-vencio),
+        createdAt: dias(-prometidaEl),
+      });
+
+      if (desenlace < 0.45) {
+        // Cumplió: pagó lo prometido dentro del plazo.
+        cobros.push({
+          id: randomUUID(),
+          organizationId,
+          clientId,
+          amount: prometido,
+          currency: "PYG",
+          paymentDate: dias(-vencio + entre(0, 2)),
+          paymentMethod: pick(["BANCARD", "TIGO_MONEY", "PAGO_EXPRESS", "CASH"] as const),
+          reference: `PRM-${i + 1}-OK`,
+          registeredById: operadores[i % operadores.length].id,
+        });
+      } else if (desenlace < 0.7) {
+        // Pagó una parte: ni cumplida ni rota, que es el caso que más discuten
+        // el supervisor y el operador.
+        cobros.push({
+          id: randomUUID(),
+          organizationId,
+          clientId,
+          amount: Math.round((prometido * 0.4) / 10000) * 10000,
+          currency: "PYG",
+          paymentDate: dias(-vencio + entre(0, 2)),
+          paymentMethod: pick(["AQUI_PAGO", "PERSONAL_ENVIOS", "DEPOSIT"] as const),
+          reference: `PRM-${i + 1}-PARC`,
+          registeredById: operadores[i % operadores.length].id,
+        });
+      }
+      // El resto no pagó nada: promesa rota, y aparece en el top del reporte.
+    }
   }
 
   await prisma.invoice.createMany({ data: facturas });

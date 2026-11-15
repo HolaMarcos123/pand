@@ -44,7 +44,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/clients", label: "Clientes", icon: UsersRound },
     { href: "/tasks", label: "Tareas", icon: ListChecks, showTaskBadge: true },
     { href: "/admin/users", label: "Usuarios", icon: Users },
-    { href: "/reports", label: "Reportes", icon: BarChart3, comingSoon: true },
+    { href: "/reports", label: "Reportes", icon: BarChart3 },
     { href: "/ai-agent", label: "IA", icon: Bot, comingSoon: true },
     { href: "/admin/settings", label: "Config", icon: Settings, comingSoon: true },
   ],
@@ -52,7 +52,7 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/overview", label: "Overview", icon: LayoutDashboard },
     { href: "/clients", label: "Clientes", icon: UsersRound },
     { href: "/tasks", label: "Tareas", icon: ListChecks, showTaskBadge: true },
-    { href: "/reports", label: "Reportes", icon: BarChart3, comingSoon: true },
+    { href: "/reports", label: "Reportes", icon: BarChart3 },
     { href: "/ai-agent", label: "IA", icon: Bot, comingSoon: true },
   ],
   OPERATOR: [
