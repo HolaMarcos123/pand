@@ -369,6 +369,43 @@ secreto `TEST_DATABASE_URL` (Settings → Secrets and variables → Actions). Si
 secreto el job se saltea en vez de fallar en rojo. Conviene apuntarlo a un
 proyecto de Supabase que no sea el de producción.
 
+## Invitaciones y enlaces de correo
+
+Las invitaciones y la recuperación de contraseña terminan en
+`/definir-password`, que toma la sesión del fragmento de la URL y pide una
+contraseña nueva. Hasta que esa pantalla existió, la invitación mandaba a
+`/login`: la persona entraba esa vez con la sesión del enlace, nunca definía
+contraseña, y como el enlace es de un solo uso quedaba afuera al día siguiente.
+
+Tres cosas que no son obvias y costaron una tarde:
+
+**El redirect lo decide Supabase, no nosotros.** El código manda
+`redirectTo: ${NEXT_PUBLIC_APP_URL}/definir-password`, pero Supabase lo
+**descarta** si ese dominio no está en su lista de redirecciones permitidas, y
+en su lugar usa el *Site URL* del proyecto. El síntoma es inconfundible: el
+enlace cae en un dominio que no pediste y con el path en `/` pelado, en vez de
+`/definir-password`.
+
+Hay que configurarlo en Supabase → Authentication → **URL Configuration**:
+
+- *Site URL*: el dominio de producción (`https://pand-phi.vercel.app`).
+- *Redirect URLs*: `https://pand-phi.vercel.app/**` y `http://localhost:3000/**`.
+
+El `/**` no es decorativo: sin él solo vale la raíz exacta. Esto se vuelve a
+tocar el día que haya un dominio propio.
+
+**Los enlaces se queman al primer acceso.** Lo mire quien lo mire: un escáner de
+links del proveedor de correo, una previsualización, un `curl` de diagnóstico.
+Cuando eso pasa, Supabase devuelve `otp_expired` y `/definir-password` lo
+explica y ofrece pedir otro, en vez de mostrar un error crudo.
+
+**El cliente no lee solo el token del fragmento.** `createBrowserClient` de
+`@supabase/ssr` usa flujo PKCE, donde el cliente espera un `?code=` en la query;
+los tokens que una invitación deja en el `#` los ignora. Por eso
+`definir-password` parsea el fragmento y llama `setSession` explícitamente, y
+después limpia la URL con `replaceState` para que el token no quede en la barra
+ni en el historial.
+
 ## Secretos
 
 `.env.local` es la única fuente de verdad y está gitignorado. `prisma.config.ts`
