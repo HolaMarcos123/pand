@@ -66,7 +66,15 @@ export default async function UsersPage() {
         />
       </div>
 
-      <UsersTable users={rows} />
+      <UsersTable users={rows} usuarioActualId={session.user.id} />
+
+      <p className="text-xs text-pand-gris">
+        <strong>Desactivar</strong> corta el acceso y libera el asiento del plan,
+        pero conserva quién hizo cada gestión y quién registró cada cobro.{" "}
+        <strong>Eliminar</strong> borra la cuenta y libera el email para volver a
+        invitarlo, y por eso solo se puede con alguien que todavía no registró
+        nada.
+      </p>
     </div>
   );
 }
