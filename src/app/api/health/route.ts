@@ -29,6 +29,15 @@ export async function GET() {
     // El valor sí se muestra: es NEXT_PUBLIC, viaja en el bundle, no es secreto.
     // Y es el que más se olvida apuntando a localhost.
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL ?? null,
+    // Cuántos administradores de plataforma hay configurados, no quiénes. Sin
+    // esto, la única forma de saber si la variable llegó a Vercel es iniciar
+    // sesión y mirar si aparece el link al backoffice, que confunde un problema
+    // de configuración con uno de permisos. El número alcanza para distinguirlos
+    // y no dice de quién es ninguna cuenta.
+    PLATFORM_ADMIN_EMAILS: (process.env.PLATFORM_ADMIN_EMAILS ?? "")
+      .split(",")
+      .map((email) => email.trim())
+      .filter(Boolean).length,
   };
 
   let database: { ok: boolean; code?: string; detail?: string };
