@@ -7,6 +7,27 @@ import { defineConfig } from "vitest/config";
 loadEnv({ path: ".env.local", quiet: true });
 
 /**
+ * Los tests corren contra TEST_DATABASE_URL si está definida.
+ *
+ * Es para poder apuntarlos a un proyecto de Supabase que no sea el de producción.
+ * Los tests limpian lo suyo —cada uno crea su organización y la borra—, pero la
+ * red de seguridad del producto no debería escribir en la base de los clientes
+ * para hacer su trabajo.
+ *
+ * Si no está definida, caen a DATABASE_URL y lo avisan. Es preferible correrlos
+ * contra la base de desarrollo que no correrlos, pero conviene que se vea.
+ */
+if (process.env.TEST_DATABASE_URL) {
+  process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+  process.env.DIRECT_URL = process.env.TEST_DATABASE_URL;
+} else {
+  console.warn(
+    "\n  ⚠ Sin TEST_DATABASE_URL: los tests van a correr contra DATABASE_URL.\n" +
+      "    Definila en .env.local para apuntarlos a la base de pruebas.\n",
+  );
+}
+
+/**
  * Tests contra la base real.
  *
  * Cada uno se crea su propia organización con un nombre único y la borra al

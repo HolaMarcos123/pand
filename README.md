@@ -330,8 +330,10 @@ npm run test:db # contra la base real. Un minuto.
 medios de pago, los alias del importador, el formateo de fechas y montos, y la
 validación de filas del importador. Es lo que corre CI en cada push.
 
-`npm run test:db` prueba las consultas de verdad contra Supabase, con las
-credenciales de `.env.local`. **Cada test se crea su propia organización con un
+`npm run test:db` prueba las consultas de verdad contra Supabase. Usa
+`TEST_DATABASE_URL` de `.env.local` si está definida —así los tests corren contra
+el proyecto *Pand Test* y no contra producción— y si falta, cae a `DATABASE_URL`
+avisando por consola. **Cada test se crea su propia organización con un
 slug `test-…` y la borra al terminar**, así que no toca la demo ni ninguna cartera
 real, y se puede correr las veces que haga falta. Si una corrida se interrumpe a
 la mitad puede quedar una organización huérfana: se limpian borrando las
