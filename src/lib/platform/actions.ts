@@ -86,7 +86,10 @@ export async function crearEmpresa(
   try {
     const admin = createAdminClient();
     const { data, error } = await admin.auth.admin.inviteUserByEmail(emailAdmin, {
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/login`,
+      // A definir-password y no a /login: con la invitacion la persona entra
+      // una vez por el enlace, pero no tiene contraseña. Mandarla al login la
+      // dejaba adentro ese dia y afuera al siguiente.
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/definir-password`,
     });
     if (error) return { ok: false, error: error.message };
     if (!data.user) return { ok: false, error: "No se pudo enviar la invitación." };

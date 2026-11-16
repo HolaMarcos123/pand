@@ -17,6 +17,9 @@ const PUBLIC_ROUTES = [
   "/login",
   "/register",
   "/forgot-password",
+  // Acá aterriza quien viene de una invitación o de recuperar la contraseña:
+  // todavía no tiene sesión de cookie, la trae en el fragmento de la URL.
+  "/definir-password",
   "/pricing",
   "/demo",
   // Tiene que ser publica: a ella llega quien SI tiene sesion valida pero su
