@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { idSchema } from "@/lib/validation/id";
+
 import { requireSession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 
@@ -11,9 +13,9 @@ export type AssignResult =
   | { ok: false; error: string };
 
 const assignSchema = z.object({
-  clientIds: z.array(z.string().uuid()).min(1).max(500),
+  clientIds: z.array(idSchema).min(1).max(500),
   /** null desasigna. */
-  operatorId: z.string().uuid().nullable(),
+  operatorId: idSchema.nullable(),
 });
 
 /**
@@ -67,9 +69,9 @@ export async function assignClients(
 }
 
 const distributeSchema = z.object({
-  operatorIds: z.array(z.string().uuid()).min(1).max(50),
+  operatorIds: z.array(idSchema).min(1).max(50),
   /** Limitar el reparto a una cartera; sin esto, toda la organización. */
-  portfolioId: z.string().uuid().nullable(),
+  portfolioId: idSchema.nullable(),
   /** Incluir también los que ya tienen operador (reasignar todo). */
   includeAssigned: z.boolean(),
 });
@@ -233,7 +235,7 @@ export async function deleteSegment(id: string): Promise<SegmentResult> {
   if (session.user.role === "OPERATOR") {
     return { ok: false, error: "Solo un supervisor puede borrar segmentos." };
   }
-  if (!z.string().uuid().safeParse(id).success) {
+  if (!idSchema.safeParse(id).success) {
     return { ok: false, error: "Segmento inválido." };
   }
 

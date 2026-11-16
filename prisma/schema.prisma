@@ -149,6 +149,10 @@ model Organization {
   seatsUsed   Int       @default(0) @map("seats_used")
   seatsMax    Int       @default(3) @map("seats_max")
   trialEnds   DateTime? @map("trial_ends") @db.Timestamptz(6)
+  /// Cuenta suspendida por la administracion de Pand (falta de pago, abuso).
+  /// No borra nada: la organizacion y sus datos siguen enteros, pero nadie de
+  /// esa empresa puede entrar hasta que se reactive.
+  suspendedAt DateTime? @map("suspended_at") @db.Timestamptz(6)
   // No esta en la lista del P01, pero el wizard del P02 lo necesita.
   isOnboarded Boolean   @default(false) @map("is_onboarded")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)

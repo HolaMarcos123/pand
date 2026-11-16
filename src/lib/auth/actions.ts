@@ -11,6 +11,7 @@ import {
   onboardingCompanySchema,
   registerSchema,
 } from "@/lib/auth/schemas";
+import { slugify, uniqueSlug } from "@/lib/org/slug";
 import { prisma } from "@/lib/prisma";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -22,33 +23,6 @@ export type ActionState = {
 };
 
 const TRIAL_DAYS = 14;
-
-function slugify(value: string): string {
-  const base = value
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
-
-  return base || "org";
-}
-
-async function uniqueSlug(base: string): Promise<string> {
-  if (!(await prisma.organization.findUnique({ where: { slug: base } }))) {
-    return base;
-  }
-
-  for (let i = 0; i < 5; i += 1) {
-    const candidate = `${base}-${Math.random().toString(36).slice(2, 6)}`;
-    if (!(await prisma.organization.findUnique({ where: { slug: candidate } }))) {
-      return candidate;
-    }
-  }
-
-  return `${base}-${Date.now().toString(36)}`;
-}
 
 // ─────────────────────────── Login ───────────────────────────
 

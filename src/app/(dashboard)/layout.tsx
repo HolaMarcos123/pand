@@ -4,6 +4,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 import { AuthProvider } from "@/lib/auth/auth-provider";
 import { requireSession } from "@/lib/auth/session";
+import { isPlatformAdmin } from "@/lib/platform/access";
 import { getTaskCount } from "@/lib/queries/dashboard";
 
 /**
@@ -28,7 +29,10 @@ export default async function DashboardLayout({
   return (
     <AuthProvider session={session}>
       <div className="flex min-h-screen">
-        <Sidebar taskCount={taskCount} />
+        <Sidebar
+          taskCount={taskCount}
+          esAdminDePlataforma={isPlatformAdmin(session.user.email)}
+        />
 
         {/* min-w-0 para que una tabla ancha scrollee dentro del área y no empuje
             el layout entero hacia la derecha. */}

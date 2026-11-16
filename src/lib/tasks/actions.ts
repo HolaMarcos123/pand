@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { idSchema } from "@/lib/validation/id";
+
 
 import type { InvoiceStatus } from "@/generated/prisma/enums";
 import type { ManualInvoiceStatus } from "@/lib/collections/invoice-status";
@@ -40,7 +42,7 @@ export async function loadClientDetail(clientId: string) {
 }
 
 const managementSchema = z.object({
-  clientId: z.string().uuid(),
+  clientId: idSchema,
   actionType: z.enum([
     "CALL",
     "EMAIL",
@@ -148,8 +150,8 @@ export async function saveManagementAction(
 }
 
 const paymentSchema = z.object({
-  clientId: z.string().uuid(),
-  invoiceIds: z.array(z.string().uuid()).max(100).default([]),
+  clientId: idSchema,
+  invoiceIds: z.array(idSchema).max(100).default([]),
   amount: z.number().positive().max(1e15),
   paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   method: z.enum(PAYMENT_METHOD_VALUES),
@@ -246,7 +248,7 @@ export async function registerPayment(
 }
 
 const invoiceStatusSchema = z.object({
-  invoiceId: z.string().uuid(),
+  invoiceId: idSchema,
   // Solo los que se ponen a mano. PAID y PARTIAL los calcula el sistema a partir
   // de los cobros: dejarlos acá permitiría marcar como pagado sin registrar plata.
   status: z.enum(

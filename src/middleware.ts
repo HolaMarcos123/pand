@@ -19,6 +19,10 @@ const PUBLIC_ROUTES = [
   "/forgot-password",
   "/pricing",
   "/demo",
+  // Tiene que ser publica: a ella llega quien SI tiene sesion valida pero su
+  // empresa esta suspendida. Si exigiera sesion, el redirect de requireSession
+  // la mandaria de vuelta y el browser entraria en un bucle.
+  "/cuenta-suspendida",
 ];
 
 function isPublic(pathname: string) {

@@ -22,6 +22,8 @@ export type SessionData = {
     plan: Plan;
     trialEnds: Date | null;
     isOnboarded: boolean;
+    /** Fecha desde la que la cuenta está suspendida por la administración. */
+    suspendedAt: Date | null;
     /** Atajo a settings.currency, que es el que usa casi toda la UI. */
     currency: string;
     /**
@@ -84,16 +86,25 @@ export const getSession = cache(async (): Promise<SessionData | null> => {
       plan: dbUser.organization.plan,
       trialEnds: dbUser.organization.trialEnds,
       isOnboarded: dbUser.organization.isOnboarded,
+      suspendedAt: dbUser.organization.suspendedAt,
       currency: settings.currency,
       tipificaciones: settings.tipificaciones,
     },
   };
 });
 
-/** Igual que getSession pero corta el render y manda al login si no hay sesion. */
+/**
+ * Igual que getSession pero corta el render y manda al login si no hay sesion.
+ *
+ * Tambien corta si la organizacion esta suspendida. El chequeo va aca y no en el
+ * layout a proposito: por aca pasan tambien las server actions, asi que una
+ * cuenta suspendida no puede seguir registrando cobros desde una pestaña que
+ * quedo abierta. El layout solo evitaria que se vea la pantalla.
+ */
 export async function requireSession(): Promise<SessionData> {
   const session = await getSession();
   if (!session) redirect("/login");
+  if (session.organization.suspendedAt) redirect("/cuenta-suspendida");
   return session;
 }
 

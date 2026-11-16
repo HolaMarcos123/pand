@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { idSchema } from "@/lib/validation/id";
+
 /** Cuántas filas viajan por request. Coincide con el batch de upsert del brief. */
 export const BATCH_SIZE = 500;
 
@@ -36,7 +38,7 @@ export const mappedRowSchema = z.object({
 });
 
 export const importBatchSchema = z.object({
-  portfolioId: z.string().uuid(),
+  portfolioId: idSchema,
   rows: z.array(mappedRowSchema).min(1).max(BATCH_SIZE),
 });
 

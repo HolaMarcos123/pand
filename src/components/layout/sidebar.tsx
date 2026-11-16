@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut } from "lucide-react";
+import { LogOut, ShieldCheck } from "lucide-react";
 
 import { useAuth } from "@/lib/auth/auth-provider";
 import { navFor } from "@/lib/nav";
@@ -24,7 +24,20 @@ function initials(fullName: string): string {
     .join("");
 }
 
-export function Sidebar({ taskCount }: { taskCount: number }) {
+export function Sidebar({
+  taskCount,
+  esAdminDePlataforma,
+}: {
+  taskCount: number;
+  /**
+   * Si quien mira administra Pand, no esta empresa.
+   *
+   * Llega calculado desde el servidor: la lista de administradores vive en una
+   * variable de entorno que no es NEXT_PUBLIC, y tiene que seguir siendo así.
+   * Acá solo entra el booleano.
+   */
+  esAdminDePlataforma: boolean;
+}) {
   const pathname = usePathname();
   const { user, organization, role, plan, isLoading, signOut } = useAuth();
 
@@ -93,6 +106,21 @@ export function Sidebar({ taskCount }: { taskCount: number }) {
           );
         })}
       </nav>
+
+      {/* El backoffice no es parte del producto que usa el cliente: va separado
+          del menú, abajo de todo y con otro tratamiento, para que nadie lo
+          confunda con una pantalla más de su empresa. */}
+      {esAdminDePlataforma && (
+        <div className="px-3 pb-2">
+          <Link
+            href="/backoffice"
+            className="flex items-center gap-3 rounded-lg border border-pand-coral/40 px-3 py-2 text-sm font-semibold text-pand-coral transition-colors hover:bg-pand-coral/10"
+          >
+            <ShieldCheck className="h-4 w-4 shrink-0" />
+            <span className="flex-1">Backoffice</span>
+          </Link>
+        </div>
+      )}
 
       <div className="space-y-4 border-t border-white/10 p-4">
         <div className="flex items-center justify-between">
