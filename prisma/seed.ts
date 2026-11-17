@@ -35,6 +35,8 @@ if (!connectionString) {
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
 const ORG_SLUG = "financiera-pand-demo";
+/** Dominio de los usuarios que genera este seed. Lo demas no se toca. */
+const EMAIL_DOMINIO = "@pand.demo";
 const ORG_NAME = "Financiera Pand Demo";
 const PASSWORD = "PandDemo2026!";
 const DOMAIN = "pand.demo"; // .demo no existe: ningún email puede salir hacia ahí
@@ -134,10 +136,36 @@ async function main() {
   // Borrar y recrear: el cascade se lleva usuarios, cartera, facturas y gestiones.
   const previa = await prisma.organization.findUnique({
     where: { slug: ORG_SLUG },
-    select: { id: true, users: { select: { id: true } } },
+    select: { id: true, users: { select: { id: true, email: true } } },
   });
 
   if (previa) {
+    // ─────────────────────────────────────────────────────────────────────
+    // Freno de mano, puesto después de romper algo de verdad.
+    //
+    // Este seed borra la organización entera, y el cascade se lleva a sus
+    // usuarios. El 17/11/2026 eso borró la cuenta real de una persona que
+    // había sido invitada a la organización demo: desapareció sin aviso, y
+    // desde afuera parecía que la recuperación de contraseña no funcionaba.
+    //
+    // Una cuenta de persona no tiene por qué vivir en la demo —ahora hay una
+    // organización interna para eso— pero el seed no puede confiar en que
+    // nadie se equivoque. Si encuentra un usuario que no generó él, se
+    // detiene y dice cuál es, en vez de borrarlo.
+    // ─────────────────────────────────────────────────────────────────────
+    const ajenos = previa.users.filter((u) => !u.email.endsWith(EMAIL_DOMINIO));
+
+    if (ajenos.length > 0) {
+      console.error(
+        `\n  ABORTADO: la organización demo tiene ${ajenos.length} usuario(s) que este seed no creó:\n` +
+          ajenos.map((u) => `    · ${u.email}`).join("\n") +
+          "\n\n  Borrar la demo se los llevaría puestos. Sacalos de esta organización" +
+          "\n  antes de reseedear, o borralos a mano si de verdad no hacen falta.\n",
+      );
+      process.exitCode = 1;
+      return;
+    }
+
     const ids = previa.users.map((u) => u.id);
     await prisma.organization.delete({ where: { id: previa.id } });
     if (ids.length) {
