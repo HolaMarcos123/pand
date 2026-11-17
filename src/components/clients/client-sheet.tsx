@@ -5,7 +5,10 @@ import {
   Loader2,
   MessageCircle,
   Phone,
+  Plus,
   TriangleAlert,
+  UserRound,
+  X,
 } from "lucide-react";
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -38,6 +41,7 @@ import {
   tiposCargables,
   type Tipificaciones,
 } from "@/lib/config/settings";
+import { agregarReferencia, borrarReferencia } from "@/lib/clients/references";
 import { toWhatsappNumber } from "@/lib/tasks/action-config";
 import {
   loadClientDetail,
@@ -99,6 +103,10 @@ export function ClientSheet({
   const [saving, startSaving] = useTransition();
   const [payOpen, setPayOpen] = useState(false);
   const [changingInvoice, setChangingInvoice] = useState<string | null>(null);
+  const [agregandoRef, setAgregandoRef] = useState(false);
+  const [refNombre, setRefNombre] = useState("");
+  const [refTelefono, setRefTelefono] = useState("");
+  const [refVinculo, setRefVinculo] = useState("");
 
   // Formulario de gestión
   const [actionType, setActionType] = useState<ActionType>(
@@ -172,6 +180,50 @@ export function ClientSheet({
       const fresh = await loadClientDetail(clienteId);
       if (fresh) setDetail(fresh);
       onDone(clienteId, false);
+    });
+  }
+
+  async function recargarFicha() {
+    const clienteId = detail?.id;
+    if (!clienteId) return;
+    const fresh = await loadClientDetail(clienteId);
+    if (fresh) setDetail(fresh);
+  }
+
+  function guardarReferencia() {
+    const clienteId = detail?.id;
+    if (!clienteId || refNombre.trim().length < 2) return;
+
+    startSaving(async () => {
+      const outcome = await agregarReferencia({
+        clientId: clienteId,
+        name: refNombre.trim(),
+        phone: refTelefono.trim() || null,
+        relation: refVinculo.trim() || null,
+      });
+
+      if (!outcome.ok) {
+        toast.error(outcome.error);
+        return;
+      }
+
+      setRefNombre("");
+      setRefTelefono("");
+      setRefVinculo("");
+      setAgregandoRef(false);
+      await recargarFicha();
+      toast.success("Referencia guardada.");
+    });
+  }
+
+  function quitarReferencia(referenceId: string) {
+    startSaving(async () => {
+      const outcome = await borrarReferencia({ referenceId });
+      if (!outcome.ok) {
+        toast.error(outcome.error);
+        return;
+      }
+      await recargarFicha();
     });
   }
 
@@ -364,6 +416,135 @@ export function ClientSheet({
                   </div>
                 )}
 
+                {/* Referencias personales: a quién llamar cuando el deudor no
+                    atiende. Van arriba de los comprobantes a propósito — cuando
+                    el teléfono del deudor no contesta, esto es lo siguiente que
+                    el operador busca. */}
+                <div className="mt-5 rounded-card border border-pand-border p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
+                      Referencias
+                    </p>
+                    {!agregandoRef && (
+                      <button
+                        type="button"
+                        onClick={() => setAgregandoRef(true)}
+                        className="flex items-center gap-1 text-xs font-semibold text-pand-azul hover:underline"
+                      >
+                        <Plus className="h-3 w-3" />
+                        Agregar
+                      </button>
+                    )}
+                  </div>
+
+                  {detail.references.length === 0 && !agregandoRef && (
+                    <p className="mt-2 text-sm text-pand-gris">
+                      Sin referencias cargadas. Si conseguís una en la llamada,
+                      guardala acá.
+                    </p>
+                  )}
+
+                  {detail.references.length > 0 && (
+                    <ul className="mt-3 space-y-2">
+                      {detail.references.map((referencia) => (
+                        <li
+                          key={referencia.id}
+                          className="group flex items-start gap-2 rounded-lg bg-pand-bg p-2.5"
+                        >
+                          <UserRound className="mt-0.5 h-4 w-4 shrink-0 text-pand-gris" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold">
+                              {referencia.name}
+                              {referencia.relation && (
+                                <span className="ml-2 text-xs font-normal text-pand-gris">
+                                  {referencia.relation}
+                                </span>
+                              )}
+                            </p>
+                            {referencia.phone && (
+                              <div className="mt-1 flex gap-1">
+                                <a
+                                  href={`tel:${referencia.phone}`}
+                                  className="mono inline-flex items-center gap-1 text-xs text-pand-azul hover:underline"
+                                >
+                                  <Phone className="h-3 w-3" />
+                                  {referencia.phone}
+                                </a>
+                                <a
+                                  href={`https://wa.me/${toWhatsappNumber(referencia.phone)}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center text-xs text-pand-gris hover:text-pand-azul"
+                                  aria-label={`WhatsApp a ${referencia.name}`}
+                                >
+                                  <MessageCircle className="h-3 w-3" />
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            aria-label={`Quitar a ${referencia.name}`}
+                            disabled={saving}
+                            onClick={() => quitarReferencia(referencia.id)}
+                            className="shrink-0 text-pand-gris opacity-0 transition-opacity hover:text-pand-coral group-hover:opacity-100"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {agregandoRef && (
+                    <div className="mt-3 space-y-2">
+                      <Input
+                        autoFocus
+                        value={refNombre}
+                        maxLength={120}
+                        placeholder="Nombre"
+                        onChange={(event) => setRefNombre(event.target.value)}
+                        className="h-9"
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input
+                          value={refTelefono}
+                          maxLength={40}
+                          placeholder="Teléfono"
+                          onChange={(event) => setRefTelefono(event.target.value)}
+                          className="h-9"
+                        />
+                        <Input
+                          value={refVinculo}
+                          maxLength={60}
+                          placeholder="Vínculo"
+                          onChange={(event) => setRefVinculo(event.target.value)}
+                          className="h-9"
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") guardarReferencia();
+                          }}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          disabled={refNombre.trim().length < 2 || saving}
+                          onClick={guardarReferencia}
+                        >
+                          Guardar
+                        </Button>
+                        <button
+                          type="button"
+                          onClick={() => setAgregandoRef(false)}
+                          className="text-xs text-pand-gris hover:underline"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <Button
                   variant="outline"
                   className="mt-5 w-full"
@@ -398,9 +579,19 @@ export function ClientSheet({
                             <p className="mono text-sm font-medium">
                               {invoice.invoiceNumber}
                             </p>
-                            {invoice.product && (
-                              <p className="truncate text-xs font-semibold text-pand-contorno">
-                                {invoice.product}
+                            {(invoice.product || invoice.portfolioName) && (
+                              <p className="truncate text-xs text-pand-contorno">
+                                {invoice.product && (
+                                  <span className="font-semibold">{invoice.product}</span>
+                                )}
+                                {/* La cartera solo cuando el deudor debe en más
+                                    de una: con una sola es ruido repetido en
+                                    cada fila. */}
+                                {invoice.portfolioName && detail.carteras.length > 1 && (
+                                  <span className="ml-2 rounded-badge bg-pand-bg px-1.5 py-0.5 text-[10px] font-semibold text-pand-gris">
+                                    {invoice.portfolioName}
+                                  </span>
+                                )}
                               </p>
                             )}
                             <p className="mono text-xs text-pand-gris">

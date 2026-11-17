@@ -132,6 +132,9 @@ export async function importBatch(input: {
         create: {
           organizationId,
           clientId: client.id,
+          // La cartera queda en el comprobante, no solo en el deudor: el mismo
+          // deudor puede aparecer en dos importaciones distintas.
+          portfolioId,
           invoiceNumber: row.invoiceNumber,
           product: row.product,
           description: row.description,
@@ -141,12 +144,47 @@ export async function importBatch(input: {
         },
         update: {
           clientId: client.id,
+          portfolioId,
           product: row.product,
           description: row.description,
           amount: row.amount,
           dueDate: new Date(`${row.dueDate}T00:00:00Z`),
         },
       });
+
+      // Referencia personal, si la planilla la trae.
+      //
+      // Se busca por nombre antes de crear porque la referencia viene repetida
+      // en cada fila del deudor: una cartera con cuatro cuotas por persona
+      // crearia la misma referencia cuatro veces. No hay unique en la tabla
+      // porque dos personas distintas pueden llamarse igual en carteras
+      // distintas; la deduplicacion es por deudor.
+      if (row.referenceName) {
+        const yaEsta = await tx.clientReference.findFirst({
+          where: { clientId: client.id, name: row.referenceName },
+          select: { id: true },
+        });
+
+        if (yaEsta) {
+          await tx.clientReference.update({
+            where: { id: yaEsta.id },
+            data: {
+              phone: row.referencePhone,
+              relation: row.referenceRelation,
+            },
+          });
+        } else {
+          await tx.clientReference.create({
+            data: {
+              organizationId,
+              clientId: client.id,
+              name: row.referenceName,
+              phone: row.referencePhone,
+              relation: row.referenceRelation,
+            },
+          });
+        }
+      }
 
       invoices += 1;
     }

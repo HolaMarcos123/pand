@@ -13,7 +13,10 @@ export type FieldKey =
   | "product"
   | "amount"
   | "dueDate"
-  | "description";
+  | "description"
+  | "referenceName"
+  | "referencePhone"
+  | "referenceRelation";
 
 export type FieldType = "text" | "number" | "date";
 
@@ -57,6 +60,21 @@ const BASE: FieldDef[] = [
   { key: "amount", label: "Monto", type: "number", required: true },
   { key: "dueDate", label: "Vencimiento", type: "date", required: true },
   { key: "description", label: "Descripción", type: "text", required: false },
+  {
+    key: "referenceName",
+    label: "Referencia: nombre",
+    type: "text",
+    required: false,
+    hint: "A quién llamar cuando el deudor no atiende. Si la planilla trae varias, mapeá la primera: el resto se cargan desde la ficha.",
+  },
+  { key: "referencePhone", label: "Referencia: teléfono", type: "text", required: false },
+  {
+    key: "referenceRelation",
+    label: "Referencia: vínculo",
+    type: "text",
+    required: false,
+    hint: "Hermano, cónyuge, garante.",
+  },
 ];
 
 const OVERRIDES: Record<Sector, Partial<Record<FieldKey, string>>> = {
@@ -124,6 +142,9 @@ const ALIASES: Record<FieldKey, string[]> = {
   amount: ["monto", "importe", "saldo", "deuda", "total", "montocuota", "amount", "valor"],
   dueDate: ["vencimiento", "fechavencimiento", "fechavto", "vto", "duedate", "fecha"],
   description: ["descripcion", "detalle", "concepto", "observacion", "description"],
+  referenceName: ["referencia", "nombrereferencia", "referencianombre", "contactoreferencia", "garante", "nombregarante"],
+  referencePhone: ["telefonoreferencia", "referenciatelefono", "telreferencia", "telefonogarante", "celularreferencia"],
+  referenceRelation: ["vinculo", "parentesco", "relacion", "vinculoreferencia"],
 };
 
 export function suggestMapping(

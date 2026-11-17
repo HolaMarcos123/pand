@@ -149,9 +149,20 @@ export type ClientDetail = {
   status: ClientStatus;
   riskScore: number | null;
   daysOverdue: number;
+  /** A quién llamar cuando el deudor no atiende. */
+  references: {
+    id: string;
+    name: string;
+    phone: string | null;
+    relation: string | null;
+    notes: string | null;
+  }[];
+  /** Carteras distintas en las que este deudor tiene deuda abierta. */
+  carteras: string[];
   invoices: {
     id: string;
     invoiceNumber: string;
+    portfolioName: string | null;
     product: string | null;
     description: string | null;
     amount: number;
@@ -207,6 +218,17 @@ export async function getClientDetail(
           dueDate: true,
           daysOverdue: true,
           status: true,
+          portfolio: { select: { name: true } },
+        },
+      },
+      references: {
+        orderBy: { createdAt: "asc" },
+        select: {
+          id: true,
+          name: true,
+          phone: true,
+          relation: true,
+          notes: true,
         },
       },
       managementActions: {
@@ -256,6 +278,14 @@ export async function getClientDetail(
     porMoneda.set(invoice.currency, actual);
   }
 
+  // Carteras con deuda abierta. Las que ya se cobraron no interesan: la
+  // pregunta del operador es "de qué cartera es lo que le estoy cobrando".
+  const carteras = [
+    ...new Set(
+      open.map((i) => i.portfolio?.name).filter((nombre): nombre is string => Boolean(nombre)),
+    ),
+  ].sort();
+
   const saldos = [...porMoneda.entries()]
     .map(([currency, datos]) => ({ currency, ...datos }))
     // La moneda con más saldo primero: es la que define la conversación.
@@ -271,6 +301,8 @@ export async function getClientDetail(
     totalDebt: Number(client.totalDebt),
     currency: saldos[0]?.currency ?? client.currency,
     saldos,
+    references: client.references,
+    carteras,
     priority: client.priority,
     status: client.status,
     riskScore: client.riskScore,
@@ -278,6 +310,7 @@ export async function getClientDetail(
     invoices: client.invoices.map((invoice) => ({
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
+      portfolioName: invoice.portfolio?.name ?? null,
       product: invoice.product,
       currency: invoice.currency,
       description: invoice.description,

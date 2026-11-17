@@ -167,6 +167,7 @@ model Organization {
   integrationConfigs IntegrationConfig[]
   aiConversations    AiConversation[]
   segments           Segment[]
+  clientReferences   ClientReference[]
 
   @@map("organizations")
 }
@@ -215,6 +216,7 @@ model Portfolio {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   uploadedBy   User?        @relation("PortfolioUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
   clients      Client[]
+  invoices     Invoice[]
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -250,6 +252,7 @@ model Client {
   invoices          Invoice[]
   managementActions ManagementAction[]
   payments          Payment[]
+  references        ClientReference[]
 
   // Evita duplicar deudores al reimportar la misma cartera.
   @@unique([organizationId, externalId])
@@ -266,6 +269,12 @@ model Invoice {
   organizationId String        @map("organization_id") @db.Uuid
   clientId       String        @map("client_id") @db.Uuid
   invoiceNumber  String        @map("invoice_number")
+  /// La cartera de la que vino ESTE comprobante.
+  ///
+  /// Esta aca y no solo en el deudor porque un mismo deudor puede figurar en
+  /// varias carteras —la de consumo y la prendaria, o la vieja y la comprada a
+  /// otra financiera— y el operador necesita saber cual esta gestionando.
+  portfolioId    String?       @map("portfolio_id") @db.Uuid
   // Que se le vendio o presto: "Credito personal", "Motocicleta Honda CG 160".
   // Va aparte de description porque se filtra y se reporta por producto.
   product        String?
@@ -283,6 +292,7 @@ model Invoice {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  portfolio    Portfolio?   @relation(fields: [portfolioId], references: [id], onDelete: SetNull)
   payments     Payment[]
 
   @@unique([organizationId, invoiceNumber])
@@ -407,4 +417,29 @@ model Segment {
   @@unique([organizationId, name])
   @@index([organizationId])
   @@map("segments")
+}
+
+/// Referencia personal de un deudor: a quien llamar cuando el deudor no atiende.
+///
+/// Es una tabla y no dos columnas mas en `clients` porque la cantidad varia —en
+/// una financiera piden dos o tres, en otra ninguna— y porque sobre esto se va a
+/// querer registrar gestiones en algun momento.
+model ClientReference {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  clientId       String   @map("client_id") @db.Uuid
+  name           String
+  phone          String?
+  /// Vinculo con el deudor: hermano, conyuge, jefe, garante.
+  relation       String?
+  notes          String?
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@map("client_references")
 }

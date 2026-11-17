@@ -43,6 +43,9 @@ const DOMAIN = "pand.demo"; // .demo no existe: ningún email puede salir hacia 
 
 const NOMBRES = ["María","José","Ana","Carlos","Rosa","Juan","Laura","Miguel","Carmen","Pedro","Lucía","Diego","Patricia","Ramón","Silvia","Gustavo","Mirta","Fernando","Gloria","Óscar","Beatriz","Hugo","Norma","Raúl","Liliana","Víctor","Elena","Marcos","Teresa","Alberto"];
 const SEGUNDOS = ["Isabel","Ramón","Beatriz","Andrés","Mercedes","Carlos","Fernanda","Ángel","Rosario","Daniel","Soledad","Javier","Elena","Eduardo","Noemí","Antonio","Raquel","Sebastián","Cristina","Marcelo"];
+/** Vinculo de una referencia personal con el deudor. */
+const VINCULOS = ["Hermano/a", "Cónyuge", "Padre/Madre", "Hijo/a", "Garante", "Jefe", "Vecino/a", "Amigo/a"];
+
 const APELLIDOS = ["González","Rodríguez","Martínez","Benítez","Fernández","López","Giménez","Torres","Ramírez","Villalba","Cáceres","Ortiz","Duarte","Acosta","Estigarribia","Espínola","Rojas","Insfrán","Ayala","Vera","Samaniego","Riveros","Aquino","Franco","Bogado"];
 
 const PRODUCTOS = ["Crédito personal","Préstamo prendario","Tarjeta de crédito","Crédito comercial","Cuota de electrodoméstico","Financiación de motocicleta"];
@@ -231,6 +234,7 @@ async function main() {
   const facturas: Prisma.InvoiceCreateManyInput[] = [];
   const gestiones: Prisma.ManagementActionCreateManyInput[] = [];
   const cobros: Prisma.PaymentCreateManyInput[] = [];
+  const referencias: Prisma.ClientReferenceCreateManyInput[] = [];
 
   for (let i = 0; i < TOTAL; i += 1) {
     const clientId = randomUUID();
@@ -245,6 +249,10 @@ async function main() {
     }
     const moraMax = entre(tramo.min, tramo.max);
     const cartera = carteras[i % carteras.length];
+    // Uno de cada seis debe en las dos carteras: compro un electrodomestico y
+    // ademas tiene una prenda. Es el caso que el operador necesita distinguir.
+    const otraCartera = carteras[(i + 1) % carteras.length];
+    const enDosCarteras = carteras.length > 1 && rnd() < 0.17;
 
     clientes.push({ id: clientId, mora: moraMax });
 
@@ -307,6 +315,9 @@ async function main() {
         organizationId,
         clientId,
         invoiceNumber: `F-${String(i + 1).padStart(4, "0")}-${j + 1}`,
+        // El ultimo comprobante va a la otra cartera cuando corresponde.
+        portfolioId:
+          enDosCarteras && j === cantidad - 1 ? otraCartera.id : cartera.id,
         product: rnd() < 0.2 ? pick(PRODUCTOS) : productoPrincipal,
         description: pick(PRODUCTOS),
         // El dolar no lleva montos de siete cifras: se divide para que el
@@ -370,6 +381,23 @@ async function main() {
         // Sin next_action_at: el trigger lo propagaría y lo sacaría de la bandeja.
         createdAt: dias(-entre(1, 6)),
       });
+    }
+
+    // Dos tercios tienen al menos una referencia. Es lo que trae una planilla
+    // real: la financiera las pide al dar el credito, aunque despues esten
+    // desactualizadas.
+    if (rnd() < 0.66) {
+      const cuantas = rnd() < 0.3 ? 2 : 1;
+      for (let r = 0; r < cuantas; r += 1) {
+        referencias.push({
+          id: randomUUID(),
+          organizationId,
+          clientId,
+          name: `${pick(NOMBRES)} ${pick(APELLIDOS)}`,
+          phone: `09${entre(61, 85)}${entre(100000, 999999)}`,
+          relation: pick(VINCULOS),
+        });
+      }
     }
 
     // Otro quinto tiene una promesa **ya vencida**, con los tres desenlaces
@@ -442,6 +470,7 @@ async function main() {
           organizationId,
           clientId,
           invoiceNumber: `F-${String(i + 1).padStart(4, "0")}-C${k}`,
+          portfolioId: cartera.id,
           product: productoPrincipal,
           description: "Cuota a vencer",
           amount: guaranies(350_000, 6_000_000),
@@ -457,6 +486,7 @@ async function main() {
   }
 
   await prisma.invoice.createMany({ data: facturas });
+  await prisma.clientReference.createMany({ data: referencias });
   await prisma.managementAction.createMany({ data: gestiones });
   await prisma.payment.createMany({ data: cobros });
   console.log(

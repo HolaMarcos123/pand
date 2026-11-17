@@ -35,6 +35,9 @@ export const mappedRowSchema = z.object({
   // ISO estricto: cualquier ambigüedad de formato se resolvió en el cliente.
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "fecha inválida"),
   description: optionalText(500),
+  referenceName: optionalText(120),
+  referencePhone: optionalText(40),
+  referenceRelation: optionalText(60),
 });
 
 export const importBatchSchema = z.object({
