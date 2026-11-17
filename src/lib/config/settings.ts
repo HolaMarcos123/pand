@@ -2,6 +2,10 @@ import { z } from "zod";
 
 import type { ActionResult, ActionType } from "@/generated/prisma/enums";
 import {
+  INTERES_POR_DEFECTO,
+  type ConfigInteres,
+} from "@/lib/collections/intereses";
+import {
   ACTION_RESULT_LABELS,
   ACTION_TYPE_LABELS,
   MANUAL_ACTION_TYPES,
@@ -108,6 +112,14 @@ export const settingsGuardadosSchema = z.object({
   currency: z.enum(MONEDAS.map((m) => m.value) as [string, ...string[]]).optional(),
   timezone: z.enum(ZONAS_HORARIAS).optional(),
   tipificaciones: tipificacionesGuardadasSchema.optional(),
+  cobranza: z
+    .object({
+      // Tasa mensual en porcentaje. El tope existe para atajar el dedo gordo:
+      // escribir 450 donde iba 4,50 convierte la ficha de un deudor en ciencia
+      // ficción y nadie lo nota hasta que un cliente lo reclama.
+      tasaMensual: z.number().min(0).max(100).optional(),
+    })
+    .optional(),
 });
 
 export type SettingsGuardados = z.infer<typeof settingsGuardadosSchema>;
@@ -116,6 +128,8 @@ export type Settings = {
   currency: string;
   timezone: string;
   tipificaciones: Tipificaciones;
+  /** Parámetros de cobranza. Hoy solo el interés por mora. */
+  cobranza: ConfigInteres;
 };
 
 export const SETTINGS_POR_DEFECTO = {
@@ -137,6 +151,10 @@ export function resolverSettings(raw: unknown): Settings {
     currency: guardado.currency ?? SETTINGS_POR_DEFECTO.currency,
     timezone: guardado.timezone ?? SETTINGS_POR_DEFECTO.timezone,
     tipificaciones: resolverTipificaciones(guardado.tipificaciones),
+    cobranza: {
+      tasaMensual:
+        guardado.cobranza?.tasaMensual ?? INTERES_POR_DEFECTO.tasaMensual,
+    },
   };
 }
 

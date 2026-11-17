@@ -155,7 +155,14 @@ async function main() {
       seatsMax: 25,
       isOnboarded: true,
       trialEnds: dias(14),
-      settings: { country: "PY", currency: "PYG", timezone: "America/Asuncion" },
+      settings: {
+        country: "PY",
+        currency: "PYG",
+        timezone: "America/Asuncion",
+        // Una tasa plausible para una financiera paraguaya, para que la ficha
+        // del deudor muestre interes y se pueda ver como queda.
+        cobranza: { tasaMensual: 4.5 },
+      },
     },
   });
 
@@ -263,6 +270,11 @@ async function main() {
     // Un deudor suele deber por un solo producto; a veces por dos.
     const productoPrincipal = pick(PRODUCTOS);
 
+    // Uno de cada diez debe ademas en dolares: una prenda, tipicamente. Sin
+    // esto no hay con que probar el caso multi-moneda, que es el que mas
+    // confunde cuando aparece por primera vez con un cliente real.
+    const tambienEnDolares = rnd() < 0.1;
+
     // Una porción chica de la cartera ya salió de lo activo: castigada o
     // refinanciada. Sin esto no hay con qué probar el tramo Castigo ni los estados
     // nuevos, y el filtro se ve siempre vacío.
@@ -286,6 +298,10 @@ async function main() {
             ? "PARTIAL"
             : "PENDING";
 
+      // Solo el ultimo comprobante va en dolares, para que el deudor quede con
+      // deuda en las dos monedas y no solo en una.
+      const enDolares = tambienEnDolares && j === cantidad - 1;
+
       facturas.push({
         id: randomUUID(),
         organizationId,
@@ -293,14 +309,16 @@ async function main() {
         invoiceNumber: `F-${String(i + 1).padStart(4, "0")}-${j + 1}`,
         product: rnd() < 0.2 ? pick(PRODUCTOS) : productoPrincipal,
         description: pick(PRODUCTOS),
-        amount: monto,
-        paidAmount: parcial,
+        // El dolar no lleva montos de siete cifras: se divide para que el
+        // numero sea creible al lado de los guaranies.
+        amount: enDolares ? Math.round(monto / 7000) : monto,
+        paidAmount: enDolares ? 0 : parcial,
         status: estado,
-        currency: "PYG",
+        currency: enDolares ? "USD" : "PYG",
         dueDate: dias(vencimiento),
       });
 
-      if (parcial > 0) {
+      if (parcial > 0 && !enDolares) {
         cobros.push({
           id: randomUUID(),
           organizationId,
@@ -408,6 +426,33 @@ async function main() {
         });
       }
       // El resto no pagó nada: promesa rota, y aparece en el top del reporte.
+    }
+    // Cuotas que todavia no vencieron.
+    //
+    // Sin esto el seed miente por omision: toda la cartera queda vencida, y
+    // entonces "deuda del mes" y "deuda total" dan siempre el mismo numero y la
+    // distincion parece inutil. Una financiera de verdad tiene un plan de pagos
+    // con cuotas por delante, y el operador gestiona lo vencido mas lo que
+    // vence este mes, no las de dentro de medio año.
+    if (rnd() < 0.55) {
+      const cuotasFuturas = entre(1, 4);
+      for (let k = 1; k <= cuotasFuturas; k += 1) {
+        facturas.push({
+          id: randomUUID(),
+          organizationId,
+          clientId,
+          invoiceNumber: `F-${String(i + 1).padStart(4, "0")}-C${k}`,
+          product: productoPrincipal,
+          description: "Cuota a vencer",
+          amount: guaranies(350_000, 6_000_000),
+          paidAmount: 0,
+          status: "PENDING",
+          currency: "PYG",
+          // La primera cae dentro de este mes y las demas en los siguientes: es
+          // la unica forma de que el corte por fin de mes separe algo.
+          dueDate: dias(entre(2, 12) + (k - 1) * 30),
+        });
+      }
     }
   }
 

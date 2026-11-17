@@ -35,9 +35,8 @@ const SECCIONES = [
   {
     href: "/admin/settings/cobranza",
     label: "Cobranza",
-    hint: "Objetivos, intereses y score",
+    hint: "Interés por mora",
     icon: Target,
-    pronto: true,
   },
   {
     href: "/admin/settings/integraciones",

@@ -133,3 +133,43 @@ export async function saveTipificaciones(
 
   return { ok: true };
 }
+
+// ───────────────────────── Cobranza ─────────────────────────
+
+const cobranzaSchema = z.object({
+  tasaMensual: z.number().min(0).max(100),
+});
+
+/**
+ * La tasa de interés por mora que usa la ficha del deudor.
+ *
+ * En cero, el producto deja de mostrar intereses en todas partes. Es el valor
+ * por defecto a propósito: mostrar un interés inventado es peor que no mostrar
+ * ninguno, porque el operador se lo dice al deudor por teléfono.
+ */
+export async function saveCobranza(
+  input: z.infer<typeof cobranzaSchema>,
+): Promise<ConfigResult> {
+  const session = await requireAdmin();
+  if (!session) {
+    return { ok: false, error: "Solo un administrador puede cambiar la configuración." };
+  }
+
+  const parsed = cobranzaSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "La tasa tiene que ser un porcentaje mensual entre 0 y 100.",
+    };
+  }
+
+  await mergeSettings(session.organization.id, {
+    cobranza: { tasaMensual: parsed.data.tasaMensual },
+  });
+
+  revalidatePath("/tasks");
+  revalidatePath("/clients");
+  revalidatePath("/admin/settings/cobranza");
+
+  return { ok: true };
+}

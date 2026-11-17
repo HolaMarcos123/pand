@@ -81,6 +81,7 @@ export default async function ClientsPage({
       canAssign={session.user.role !== "OPERATOR"}
       canSeeScore={isFeatureEnabled("ai_agent", session.organization.plan)}
       tipificaciones={session.organization.tipificaciones}
+      cobranza={session.organization.cobranza}
       filters={{
         q: query.q ?? "",
         portfolio: query.portfolio ?? "",

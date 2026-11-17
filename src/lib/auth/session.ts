@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { cache } from "react";
 
+import type { ConfigInteres } from "@/lib/collections/intereses";
 import { resolverSettings, type Tipificaciones } from "@/lib/config/settings";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
@@ -40,6 +41,8 @@ export type SessionData = {
      * Lo que necesite el resto de la configuración, que la lea del servidor.
      */
     tipificaciones: Tipificaciones;
+    /** Tasa de interés por mora. Es un parámetro de presentación, no un secreto. */
+    cobranza: ConfigInteres;
   };
 };
 
@@ -89,6 +92,7 @@ export const getSession = cache(async (): Promise<SessionData | null> => {
       suspendedAt: dbUser.organization.suspendedAt,
       currency: settings.currency,
       tipificaciones: settings.tipificaciones,
+      cobranza: settings.cobranza,
     },
   };
 });

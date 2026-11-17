@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import type { TaskRow } from "@/lib/queries/tasks";
+import type { ConfigInteres } from "@/lib/collections/intereses";
 import { labelTipo, type Tipificaciones } from "@/lib/config/settings";
 import { toWhatsappNumber } from "@/lib/tasks/action-config";
 import { cn } from "@/lib/utils";
@@ -55,6 +56,7 @@ export function TasksBoard({
   role,
   canSeeScore,
   tipificaciones,
+  cobranza,
   canChangeInvoiceStatus,
   filters,
 }: {
@@ -64,6 +66,7 @@ export function TasksBoard({
   role: Role;
   canSeeScore: boolean;
   tipificaciones: Tipificaciones;
+  cobranza: ConfigInteres;
   canChangeInvoiceStatus: boolean;
   filters: { portfolio: string; priority: string; status: string };
 }) {
@@ -178,7 +181,9 @@ export function TasksBoard({
               <TableRow>
                 <TableHead className="w-10" />
                 <TableHead>Deudor</TableHead>
-                <TableHead className="text-right">Deuda</TableHead>
+                <TableHead className="text-right" title="Vencido y lo que vence este mes">
+                  Deuda del mes
+                </TableHead>
                 <TableHead className="text-right">Días mora</TableHead>
                 <TableHead>Último contacto</TableHead>
                 {role !== "OPERATOR" && <TableHead>Operador</TableHead>}
@@ -218,8 +223,22 @@ export function TasksBoard({
                     )}
                   </TableCell>
 
-                  <TableCell className="mono text-right">
-                    {formatCurrency(task.totalDebt, currency)}
+                  <TableCell className="whitespace-nowrap text-right">
+                    <span className="mono block">
+                      {formatCurrency(task.deudaDelMes, task.moneda)}
+                    </span>
+                    {/* El total queda abajo y chico: lo que se gestiona hoy es
+                        lo vencido y lo que vence este mes, no la deuda entera. */}
+                    {task.totalDebt > task.deudaDelMes && (
+                      <span className="mono block text-[11px] text-pand-gris">
+                        de {formatCurrency(task.totalDebt, task.moneda)}
+                      </span>
+                    )}
+                    {task.monedas > 1 && (
+                      <span className="block text-[11px] font-semibold text-pand-azul">
+                        + otra moneda
+                      </span>
+                    )}
                   </TableCell>
 
                   <TableCell
@@ -301,6 +320,7 @@ export function TasksBoard({
         canSeeScore={canSeeScore}
         canChangeInvoiceStatus={canChangeInvoiceStatus}
         tipificaciones={tipificaciones}
+        cobranza={cobranza}
         onClose={() => setOpenClientId(null)}
         onDone={handleDone}
       />

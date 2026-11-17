@@ -34,6 +34,7 @@ import {
   saveSegment,
 } from "@/lib/clients/actions";
 import { TRAMOS_ACTIVOS, TRAMO_LABELS } from "@/lib/collections/tramos";
+import type { ConfigInteres } from "@/lib/collections/intereses";
 import type { Tipificaciones } from "@/lib/config/settings";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import type { ClientListResult, SegmentRow } from "@/lib/queries/clients";
@@ -80,6 +81,7 @@ export function ClientsBoard({
   canAssign,
   canSeeScore,
   tipificaciones,
+  cobranza,
   filters,
 }: {
   result: ClientListResult;
@@ -91,6 +93,7 @@ export function ClientsBoard({
   canAssign: boolean;
   canSeeScore: boolean;
   tipificaciones: Tipificaciones;
+  cobranza: ConfigInteres;
   filters: {
     q: string;
     portfolio: string;
@@ -513,7 +516,9 @@ export function ClientsBoard({
                 <TableHead>Deudor</TableHead>
                 <TableHead>Producto</TableHead>
                 <TableHead>Cartera</TableHead>
-                <TableHead className="text-right">Deuda</TableHead>
+                <TableHead className="text-right" title="Vencido y lo que vence este mes">
+                  Deuda del mes
+                </TableHead>
                 <TableHead>Tramo</TableHead>
                 <TableHead className="text-right">Días mora</TableHead>
                 <TableHead>Estado</TableHead>
@@ -567,8 +572,22 @@ export function ClientsBoard({
                     {row.portfolioName ?? "—"}
                   </TableCell>
 
-                  <TableCell className="mono whitespace-nowrap text-right">
-                    {formatCurrency(row.totalDebt, currency)}
+                  <TableCell className="whitespace-nowrap text-right">
+                    <span className="mono block">
+                      {formatCurrency(row.deudaDelMes, row.moneda)}
+                    </span>
+                    {/* El total queda abajo y chico: lo que se gestiona hoy es
+                        lo vencido y lo que vence este mes, no la deuda entera. */}
+                    {row.totalDebt > row.deudaDelMes && (
+                      <span className="mono block text-[11px] text-pand-gris">
+                        de {formatCurrency(row.totalDebt, row.moneda)}
+                      </span>
+                    )}
+                    {row.monedas > 1 && (
+                      <span className="block text-[11px] font-semibold text-pand-azul">
+                        + otra moneda
+                      </span>
+                    )}
                   </TableCell>
 
                   <TableCell>
@@ -647,6 +666,7 @@ export function ClientsBoard({
         canSeeScore={canSeeScore}
         canChangeInvoiceStatus={canAssign}
         tipificaciones={tipificaciones}
+        cobranza={cobranza}
         onClose={() => setOpenClientId(null)}
         onDone={() => router.refresh()}
       />

@@ -1,0 +1,115 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  BASE_DIAS,
+  INTERES_POR_DEFECTO,
+  calculaInteres,
+  interesAcumulado,
+  interesPorDia,
+} from "@/lib/collections/intereses";
+import { resolverSettings } from "@/lib/config/settings";
+
+/**
+ * El interés es el número que el operador le dice al deudor por teléfono.
+ *
+ * Por eso lo que más importa de estos tests no es la aritmética —que es
+ * trivial— sino que el cálculo **nunca produzca un número raro**: ni NaN, ni
+ * negativo, ni interés sobre una deuda que no está vencida. Cualquiera de esos
+ * se convierte en una cifra dicha en voz alta que después hay que desdecir.
+ */
+
+const TASA = { tasaMensual: 4.5 };
+
+describe("interesAcumulado", () => {
+  it("interés simple: tasa mensual repartida en 30 días", () => {
+    // 1.000.000 al 4,5 % mensual = 45.000 por mes = 1.500 por día.
+    expect(interesAcumulado(1_000_000, 30, TASA)).toBeCloseTo(45_000, 6);
+    expect(interesAcumulado(1_000_000, 1, TASA)).toBeCloseTo(1_500, 6);
+    expect(interesAcumulado(1_000_000, 90, TASA)).toBeCloseTo(135_000, 6);
+  });
+
+  it("no capitaliza: 90 días es exactamente el triple de 30", () => {
+    // Capitalizar sin conocer la regla del acreedor produce números que se
+    // despegan rápido de los reales. Si alguien agrega capitalización, este
+    // test falla y obliga a pensarlo.
+    const a30 = interesAcumulado(2_000_000, 30, TASA);
+    const a90 = interesAcumulado(2_000_000, 90, TASA);
+    expect(a90).toBeCloseTo(a30 * 3, 6);
+  });
+
+  it("sin mora no hay interés", () => {
+    for (const dias of [0, -1, -400]) {
+      expect(interesAcumulado(1_000_000, dias, TASA)).toBe(0);
+    }
+  });
+
+  it("sin tasa configurada no hay interés", () => {
+    expect(interesAcumulado(1_000_000, 90, { tasaMensual: 0 })).toBe(0);
+    expect(interesAcumulado(1_000_000, 90, INTERES_POR_DEFECTO)).toBe(0);
+  });
+
+  it("un saldo cero o negativo no genera interés", () => {
+    // Un comprobante sobrepagado tiene saldo negativo: cobrarle interés a eso
+    // daría un número negativo en pantalla.
+    expect(interesAcumulado(0, 90, TASA)).toBe(0);
+    expect(interesAcumulado(-50_000, 90, TASA)).toBe(0);
+  });
+
+  it("nunca devuelve NaN, por más basura que entre", () => {
+    const basura = [NaN, Infinity, -Infinity];
+    for (const valor of basura) {
+      expect(Number.isNaN(interesAcumulado(valor, 30, TASA))).toBe(false);
+      expect(Number.isNaN(interesAcumulado(1_000_000, valor, TASA))).toBe(false);
+      expect(
+        Number.isNaN(interesAcumulado(1_000_000, 30, { tasaMensual: valor })),
+      ).toBe(false);
+    }
+  });
+});
+
+describe("interesPorDia", () => {
+  it("es el acumulado de un día", () => {
+    expect(interesPorDia(1_000_000, TASA)).toBeCloseTo(
+      interesAcumulado(1_000_000, 1, TASA),
+      6,
+    );
+  });
+
+  it("la base son 30 días, no el mes calendario", () => {
+    // Si fuera el mes calendario, el interés diario cambiaría entre febrero y
+    // marzo sobre la misma deuda, y el deudor lo notaría.
+    expect(interesPorDia(BASE_DIAS * 1000, { tasaMensual: 100 })).toBeCloseTo(1000, 6);
+  });
+});
+
+describe("calculaInteres", () => {
+  it("decide si la UI dibuja la columna", () => {
+    expect(calculaInteres({ tasaMensual: 4.5 })).toBe(true);
+    expect(calculaInteres({ tasaMensual: 0 })).toBe(false);
+    expect(calculaInteres({ tasaMensual: NaN })).toBe(false);
+  });
+});
+
+describe("la tasa en la configuración", () => {
+  it("sin configurar, viene en cero: no se inventa un interés", () => {
+    // Mostrar un interés que nadie configuró es peor que no mostrar ninguno,
+    // porque el operador se lo dice al deudor como si fuera cierto.
+    expect(resolverSettings({}).cobranza.tasaMensual).toBe(0);
+    expect(resolverSettings(null).cobranza.tasaMensual).toBe(0);
+  });
+
+  it("se lee la tasa guardada", () => {
+    expect(
+      resolverSettings({ cobranza: { tasaMensual: 3.75 } }).cobranza.tasaMensual,
+    ).toBe(3.75);
+  });
+
+  it("una tasa imposible se descarta y queda en cero", () => {
+    for (const valor of [-5, 450, "mucho", null]) {
+      expect(
+        resolverSettings({ cobranza: { tasaMensual: valor } }).cobranza.tasaMensual,
+        `con ${JSON.stringify(valor)}`,
+      ).toBe(0);
+    }
+  });
+});

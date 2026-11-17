@@ -16,6 +16,13 @@ export const CLIENTS_PER_PAGE = 25;
 const MORA_LATERAL = Prisma.sql`
   LEFT JOIN LATERAL (
     SELECT MAX(i.days_overdue) FILTER (WHERE i.status IN ('PENDING', 'PARTIAL')) AS dias,
+           -- Lo que se gestiona hoy: vencido mas lo que vence dentro del mes.
+           COALESCE(SUM(i.amount - i.paid_amount) FILTER (
+             WHERE i.status IN ('PENDING', 'PARTIAL')
+               AND i.due_date <= (date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date
+           ), 0)::float8 AS del_mes,
+           COUNT(DISTINCT i.currency) FILTER (WHERE i.status IN ('PENDING', 'PARTIAL'))::int AS monedas,
+           MIN(i.currency) FILTER (WHERE i.status IN ('PENDING', 'PARTIAL')) AS moneda,
            COUNT(*) FILTER (WHERE i.status IN ('PENDING', 'PARTIAL'))::int       AS abiertos,
            COUNT(*) FILTER (WHERE i.status = 'WRITTEN_OFF')::int                 AS castigados,
            string_agg(DISTINCT i.product, ', ')                                  AS productos
@@ -36,6 +43,11 @@ export type ClientListRow = {
   externalId: string | null;
   phone: string | null;
   totalDebt: number;
+  /** Vencido mas lo que vence dentro del mes. Es lo que se gestiona hoy. */
+  deudaDelMes: number;
+  /** Cuantas monedas distintas debe. Mas de una no se puede sumar. */
+  monedas: number;
+  moneda: string;
   priority: ClientPriority;
   status: ClientStatus;
   daysOverdue: number;
@@ -149,6 +161,9 @@ export async function getClients(
              c.priority,
              c.status,
              COALESCE(mora.dias, 0) AS "daysOverdue",
+             COALESCE(mora.del_mes, 0) AS "deudaDelMes",
+             COALESCE(mora.monedas, 1) AS "monedas",
+             COALESCE(mora.moneda, c.currency) AS "moneda",
              mora.abiertos,
              mora.castigados,
              mora.productos    AS "products",

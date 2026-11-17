@@ -17,6 +17,12 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
+  calculaInteres,
+  interesAcumulado,
+  interesPorDia,
+  type ConfigInteres,
+} from "@/lib/collections/intereses";
+import {
   INVOICE_STATUS_LABELS,
   INVOICE_STATUS_TONE,
   MANUAL_INVOICE_STATUSES,
@@ -71,6 +77,7 @@ export function ClientSheet({
   canSeeScore,
   canChangeInvoiceStatus,
   tipificaciones,
+  cobranza,
   onClose,
   onDone,
 }: {
@@ -82,6 +89,8 @@ export function ClientSheet({
   canChangeInvoiceStatus: boolean;
   /** Cómo llama esta organización a cada gestión y a cada resultado. */
   tipificaciones: Tipificaciones;
+  /** Tasa de interés por mora. En cero, no se muestra interés en ningún lado. */
+  cobranza: ConfigInteres;
   onClose: () => void;
   onDone: (clientId: string, leftInbox: boolean) => void;
 }) {
@@ -194,7 +203,13 @@ export function ClientSheet({
 
   return (
     <Sheet open={Boolean(clientId)} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+      {/* A pantalla completa y no un panel lateral: en la ficha de un deudor
+          con varias deudas, en dos monedas y con historial, el panel angosto
+          obligaba a scrollear para ver junto lo que hay que mirar junto. */}
+      <SheetContent
+        side="full"
+        className="flex w-full flex-col gap-0 overflow-hidden p-0"
+      >
         {loading || !detail ? (
           <div className="flex flex-1 items-center justify-center">
             {loading ? (
@@ -205,7 +220,11 @@ export function ClientSheet({
           </div>
         ) : (
           <>
-            <div className="flex-1 overflow-y-auto">
+            {/* En pantallas anchas, el trabajo queda a la derecha y los datos
+                del deudor a la izquierda, los dos visibles a la vez. En angostas
+                vuelve a ser una sola columna apilada. */}
+            <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+            <div className="min-w-0 flex-1 overflow-y-auto lg:border-r lg:border-pand-border">
               {/* ── A · Perfil ───────────────────────────────── */}
               <section className="border-b border-pand-border bg-white p-6">
                 <div className="flex items-start justify-between gap-3">
@@ -249,28 +268,81 @@ export function ClientSheet({
                   )}
                 </div>
 
-                <div className="mt-5 grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
-                      Deuda total
-                    </p>
-                    <p className="mono mt-1 text-2xl font-medium">
-                      {formatCurrency(detail.totalDebt, currency)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
-                      Días de mora
-                    </p>
-                    <p
-                      className={cn(
-                        "mono mt-1 text-2xl font-medium",
-                        detail.daysOverdue > 90 && "text-pand-coral",
-                      )}
-                    >
-                      {formatNumber(detail.daysOverdue)}
-                    </p>
-                  </div>
+                {/* Un bloque por moneda. No se suman: un deudor con una prenda
+                    en dólares y una tarjeta en guaraníes tiene dos deudas, y el
+                    total junto sería un número que no significa nada sin tipo de
+                    cambio — que Pand no tiene. */}
+                <div className="mt-5 space-y-3">
+                  {(detail.saldos.length > 0
+                    ? detail.saldos
+                    : [{ currency, total: detail.totalDebt, delMes: 0, diasMora: detail.daysOverdue }]
+                  ).map((saldo) => {
+                    const interes = interesAcumulado(
+                      saldo.total,
+                      saldo.diasMora,
+                      cobranza,
+                    );
+
+                    return (
+                      <div
+                        key={saldo.currency}
+                        className="rounded-card border border-pand-border bg-white p-4"
+                      >
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <span className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
+                            Deuda abierta
+                            {detail.saldos.length > 1 && (
+                              <span className="mono ml-2 rounded-badge bg-pand-bg px-1.5 py-0.5 text-[10px]">
+                                {saldo.currency}
+                              </span>
+                            )}
+                          </span>
+                          <span
+                            className={cn(
+                              "mono text-xs",
+                              saldo.diasMora > 90 && "text-pand-coral",
+                            )}
+                          >
+                            {formatNumber(saldo.diasMora)} días de mora
+                          </span>
+                        </div>
+
+                        <p className="mono mt-1 text-2xl font-medium">
+                          {formatCurrency(saldo.total, saldo.currency)}
+                        </p>
+
+                        <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-pand-border pt-3 text-sm">
+                          <div>
+                            {/* Lo que se gestiona hoy: vencido más lo que vence
+                                antes de fin de mes. El total de arriba incluye
+                                cuotas de dentro de medio año. */}
+                            <dt className="text-xs text-pand-gris">Vencido y del mes</dt>
+                            <dd className="mono font-semibold">
+                              {formatCurrency(saldo.delMes, saldo.currency)}
+                            </dd>
+                          </div>
+
+                          {calculaInteres(cobranza) && interes > 0 && (
+                            <div>
+                              <dt className="text-xs text-pand-gris">
+                                Interés estimado
+                              </dt>
+                              <dd className="mono font-semibold text-pand-coral">
+                                {formatCurrency(interes, saldo.currency)}
+                              </dd>
+                              <dd className="mt-0.5 text-[11px] text-pand-gris">
+                                {formatCurrency(
+                                  interesPorDia(saldo.total, cobranza),
+                                  saldo.currency,
+                                )}{" "}
+                                por día
+                              </dd>
+                            </div>
+                          )}
+                        </dl>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {/* El score de riesgo lo produce el agente de IA (P07): mostrarlo en
@@ -401,7 +473,10 @@ export function ClientSheet({
                   </div>
                 )}
               </section>
+            </div>
 
+            <div className="flex min-h-0 w-full flex-col overflow-hidden lg:w-[460px] lg:shrink-0">
+              <div className="min-h-0 flex-1 overflow-y-auto">
               {/* ── C · Historial ────────────────────────────── */}
               <section className="p-6">
                 <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
@@ -453,7 +528,7 @@ export function ClientSheet({
                   </ul>
                 )}
               </section>
-            </div>
+              </div>
 
             {/* ── D · Nueva gestión (siempre visible) ─────────── */}
             <section
@@ -580,6 +655,8 @@ export function ClientSheet({
                 Guardar gestión
               </Button>
             </section>
+            </div>
+            </div>
 
             <PaymentDialog
               open={payOpen}

@@ -68,6 +68,7 @@ export default async function TasksPage({
       canSeeScore={isFeatureEnabled("ai_agent", session.organization.plan)}
       canChangeInvoiceStatus={session.user.role !== "OPERATOR"}
       tipificaciones={session.organization.tipificaciones}
+      cobranza={session.organization.cobranza}
       filters={{
         portfolio: query.portfolio ?? "",
         priority: query.priority ?? "",

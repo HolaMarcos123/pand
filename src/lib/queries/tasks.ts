@@ -8,6 +8,11 @@ export type TaskRow = {
   documentNumber: string | null;
   phone: string | null;
   totalDebt: number;
+  /** Vencido mas lo que vence dentro del mes. Es lo que se gestiona hoy. */
+  deudaDelMes: number;
+  /** Cuantas monedas distintas debe. Mas de una no se puede sumar. */
+  monedas: number;
+  moneda: string;
   priority: ClientPriority;
   status: ClientStatus;
   daysOverdue: number;
@@ -68,6 +73,9 @@ export async function getTasks(
            c.document_number AS "documentNumber",
            c.phone,
            c.total_debt::float8 AS "totalDebt",
+           COALESCE(mora.del_mes, 0) AS "deudaDelMes",
+           COALESCE(mora.monedas, 1) AS "monedas",
+           COALESCE(mora.moneda, c.currency) AS "moneda",
            c.priority,
            c.status,
            COALESCE(mora.dias, 0) AS "daysOverdue",
@@ -79,7 +87,15 @@ export async function getTasks(
       -- LATERAL y no subconsulta en el SELECT: se evalúa una vez por cliente aunque
       -- se usen dos columnas de cada bloque.
       LEFT JOIN LATERAL (
-        SELECT MAX(i.days_overdue) AS dias
+        SELECT MAX(i.days_overdue) AS dias,
+               -- Lo que se gestiona hoy: lo vencido mas lo que vence antes de
+               -- que termine el mes. El total de deuda abierta incluye cuotas
+               -- de dentro de seis meses y no sirve para priorizar el dia.
+               COALESCE(SUM(i.amount - i.paid_amount) FILTER (
+                 WHERE i.due_date <= (date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date
+               ), 0)::float8 AS del_mes,
+               COUNT(DISTINCT i.currency)::int AS monedas,
+               MIN(i.currency) AS moneda
           FROM invoices i
          WHERE i.client_id = c.id
            AND i.status IN ('PENDING', 'PARTIAL')
@@ -111,7 +127,24 @@ export type ClientDetail = {
   phone: string | null;
   phoneAlt: string | null;
   totalDebt: number;
+  /** La moneda principal del deudor. Ver `saldos` para el caso multi-moneda. */
   currency: string;
+  /**
+   * Saldo abierto por moneda.
+   *
+   * Un deudor puede tener una prenda en dólares y una tarjeta en guaraníes, y
+   * sumarlas daría un número que no significa nada. Son listas separadas
+   * justamente para que nadie las sume sin tipo de cambio.
+   */
+  saldos: {
+    currency: string;
+    /** Lo abierto, sin importar vencimiento. */
+    total: number;
+    /** Vencido más lo que vence dentro del mes: lo que se gestiona hoy. */
+    delMes: number;
+    /** Días de mora del comprobante más viejo en esa moneda. */
+    diasMora: number;
+  }[];
   priority: ClientPriority;
   status: ClientStatus;
   riskScore: number | null;
@@ -123,6 +156,7 @@ export type ClientDetail = {
     description: string | null;
     amount: number;
     paidAmount: number;
+    currency: string;
     dueDate: string;
     daysOverdue: number;
     status: string;
@@ -169,6 +203,7 @@ export async function getClientDetail(
           description: true,
           amount: true,
           paidAmount: true,
+          currency: true,
           dueDate: true,
           daysOverdue: true,
           status: true,
@@ -197,6 +232,35 @@ export async function getClientDetail(
     (i) => i.status === "PENDING" || i.status === "PARTIAL",
   );
 
+  // Fin del mes corriente: lo que vence hasta ahí es lo que se gestiona hoy. Un
+  // comprobante que vence el 28 ya entra en la conversación del día 2, y el
+  // total de deuda abierta —que incluye cuotas de dentro de seis meses— no
+  // sirve para eso.
+  const finDeMes = new Date();
+  finDeMes.setUTCHours(0, 0, 0, 0);
+  finDeMes.setUTCMonth(finDeMes.getUTCMonth() + 1, 0);
+
+  const porMoneda = new Map<string, { total: number; delMes: number; diasMora: number }>();
+  for (const invoice of open) {
+    const saldo = Number(invoice.amount) - Number(invoice.paidAmount);
+    const actual = porMoneda.get(invoice.currency) ?? {
+      total: 0,
+      delMes: 0,
+      diasMora: 0,
+    };
+
+    actual.total += saldo;
+    if (invoice.dueDate <= finDeMes) actual.delMes += saldo;
+    actual.diasMora = Math.max(actual.diasMora, invoice.daysOverdue);
+
+    porMoneda.set(invoice.currency, actual);
+  }
+
+  const saldos = [...porMoneda.entries()]
+    .map(([currency, datos]) => ({ currency, ...datos }))
+    // La moneda con más saldo primero: es la que define la conversación.
+    .sort((a, b) => b.total - a.total);
+
   return {
     id: client.id,
     name: client.name,
@@ -205,7 +269,8 @@ export async function getClientDetail(
     phone: client.phone,
     phoneAlt: client.phoneAlt,
     totalDebt: Number(client.totalDebt),
-    currency: client.currency,
+    currency: saldos[0]?.currency ?? client.currency,
+    saldos,
     priority: client.priority,
     status: client.status,
     riskScore: client.riskScore,
@@ -214,6 +279,7 @@ export async function getClientDetail(
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
       product: invoice.product,
+      currency: invoice.currency,
       description: invoice.description,
       amount: Number(invoice.amount),
       paidAmount: Number(invoice.paidAmount),
