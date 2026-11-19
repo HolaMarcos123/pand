@@ -259,12 +259,20 @@ export function PaymentsWizard({ currency }: { currency: string }) {
                 ? `${formatNumber(sheet.rows.length)} filas · ${sheet.headers.length} columnas`
                 : "Arrastrá el archivo o hacé clic para elegirlo"}
             </p>
-            <p className="mt-1 text-xs text-pand-gris">.xlsx o .csv · hasta 15 MB</p>
+            <p className="mt-1 text-xs text-pand-gris">
+              .xlsx, .xlsb, .xls o .csv · hasta 70 MB
+            </p>
+            {/* El consejo importa: un .xlsx es XML comprimido y el navegador lo
+                expande en memoria. Para una cartera grande, .xlsb o .csv pesan
+                menos y se leen mucho más rápido. */}
+            <p className="mt-1 text-xs text-pand-gris">
+              Para archivos grandes conviene .xlsb o .csv
+            </p>
 
             <input
               ref={fileInput}
               type="file"
-              accept=".xlsx,.xlsm,.xls,.csv,.tsv"
+              accept=".xlsx,.xlsm,.xlsb,.xls,.csv,.tsv"
               className="hidden"
               onChange={(event) => {
                 const file = event.target.files?.[0];
