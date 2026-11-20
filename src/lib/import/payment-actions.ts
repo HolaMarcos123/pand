@@ -8,8 +8,10 @@ import {
   type PaymentRow,
 } from "@/lib/import/validate-payments";
 import {
-  allocateToInvoices,
-  refreshClientBalance,
+  planificarImputacion,
+  refreshClientBalances,
+  type InvoiceChange,
+  type OpenInvoice,
 } from "@/lib/payments/apply";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
@@ -68,6 +70,8 @@ export async function importPaymentBatch(input: {
   const organizationId = session.organization.id;
   const currency = session.organization.currency;
   const registeredById = session.user.id;
+  const { rows } = parsed.data;
+  const ahora = new Date();
 
   let applied = 0;
   let duplicated = 0;
@@ -77,28 +81,86 @@ export async function importPaymentBatch(input: {
 
   await prisma.$transaction(
     async (tx) => {
-      for (const row of parsed.data.rows) {
-        // ── 1. Encontrar al deudor ──────────────────────────────
+      // ───────────────────────────────────────────────────────────────────────
+      // Por qué el lote se resuelve de una vez y no fila por fila.
+      //
+      // Antes cada cobro hacía sus propias consultas: buscar al deudor por ID,
+      // buscarlo por documento, ver si la referencia ya estaba, traer sus
+      // comprobantes abiertos, escribir cada uno, insertar el cobro y recalcular
+      // el saldo. Seis a ocho viajes a la base por fila, uno después del otro, y
+      // la base casi no trabajaba: se esperaba la latencia de cada ida y vuelta.
+      //
+      // Ahora son unas pocas consultas de tamaño fijo, la aritmética corre en
+      // memoria y todo se escribe junto al final. La aritmética es la misma:
+      // `planificarImputacion`, la que usa el modal de la bandeja. Lo único que
+      // cambió es cuándo se va a la base.
+      // ───────────────────────────────────────────────────────────────────────
+
+      // ── 1. Resolver deudores y duplicados para todo el lote ──────────────
+      const externalIds = [
+        ...new Set(rows.map((r) => r.matchExternalId).filter((v): v is string => !!v)),
+      ];
+      const documentos = [
+        ...new Set(rows.map((r) => r.matchDocument).filter((v): v is string => !!v)),
+      ];
+      const referencias = [
+        ...new Set(rows.map((r) => r.reference).filter((v): v is string => !!v)),
+      ];
+
+      const porExternal = new Map<string, string>();
+      if (externalIds.length > 0) {
+        const encontrados = await tx.client.findMany({
+          where: { organizationId, externalId: { in: externalIds } },
+          select: { id: true, externalId: true },
+        });
+        for (const c of encontrados) {
+          if (c.externalId) porExternal.set(c.externalId, c.id);
+        }
+      }
+
+      // El documento no es único en el schema: dos deudores pueden compartirlo.
+      // Se guardan todos los que coinciden para poder distinguir "no está" de
+      // "hay varios" —adivinar cuál es arriesga imputarle el cobro al equivocado—.
+      const porDocumento = new Map<string, string[]>();
+      if (documentos.length > 0) {
+        const encontrados = await tx.client.findMany({
+          where: { organizationId, documentNumber: { in: documentos } },
+          select: { id: true, documentNumber: true },
+        });
+        for (const c of encontrados) {
+          if (!c.documentNumber) continue;
+          const lista = porDocumento.get(c.documentNumber) ?? [];
+          lista.push(c.id);
+          porDocumento.set(c.documentNumber, lista);
+        }
+      }
+
+      const yaCargadas = new Set<string>();
+      if (referencias.length > 0) {
+        const existentes = await tx.payment.findMany({
+          where: { organizationId, reference: { in: referencias } },
+          select: { reference: true },
+        });
+        for (const p of existentes) {
+          if (p.reference) yaCargadas.add(p.reference);
+        }
+      }
+
+      // ── 2. Clasificar cada fila ──────────────────────────────────────────
+      const pendientes: { row: PaymentRow; clientId: string }[] = [];
+      const referenciasDelLote = new Set<string>();
+
+      for (const row of rows) {
         let clientId: string | null = null;
 
         if (row.matchExternalId) {
-          const found = await tx.client.findFirst({
-            where: { organizationId, externalId: row.matchExternalId },
-            select: { id: true },
-          });
-          clientId = found?.id ?? null;
+          clientId = porExternal.get(row.matchExternalId) ?? null;
         }
 
         if (!clientId && row.matchDocument) {
-          const matches = await tx.client.findMany({
-            where: { organizationId, documentNumber: row.matchDocument },
-            select: { id: true },
-            take: 2,
-          });
+          const candidatos = porDocumento.get(row.matchDocument) ?? [];
 
-          if (matches.length > 1) {
-            // El documento no es unico en el schema: dos deudores pueden compartirlo.
-            // Adivinar cual es arriesga imputarle el cobro al equivocado.
+          if (candidatos.length > 1) {
             problems.push({
               row: row.rowNumber,
               status: "ambiguous",
@@ -107,7 +169,7 @@ export async function importPaymentBatch(input: {
             continue;
           }
 
-          clientId = matches[0]?.id ?? null;
+          clientId = candidatos[0] ?? null;
         }
 
         if (!clientId) {
@@ -119,14 +181,12 @@ export async function importPaymentBatch(input: {
           continue;
         }
 
-        // ── 2. ¿Ya estaba cargado? ──────────────────────────────
         if (row.reference) {
-          const existing = await tx.payment.findFirst({
-            where: { organizationId, reference: row.reference },
-            select: { id: true },
-          });
-
-          if (existing) {
+          // Ya cargada en otra oportunidad, o repetida dentro de este mismo
+          // lote. Lo segundo antes se estrellaba contra el unique de la base
+          // —el chequeo solo miraba lo ya confirmado— y volteaba el lote
+          // entero: es más útil saltear la fila y decir cuál era.
+          if (yaCargadas.has(row.reference) || referenciasDelLote.has(row.reference)) {
             duplicated += 1;
             problems.push({
               row: row.rowNumber,
@@ -135,60 +195,127 @@ export async function importPaymentBatch(input: {
             });
             continue;
           }
+          referenciasDelLote.add(row.reference);
         }
 
-        // ── 3. Imputar ──────────────────────────────────────────
-        // La aritmética vive en lib/payments/apply: es la misma que usa el modal de
-        // cobro de la bandeja, para que un cobro no termine en dos estados distintos
-        // según por dónde haya entrado.
-        const {
-          allocated: appliedAmount,
-          remaining,
-          firstInvoiceId,
-        } = await allocateToInvoices(tx, {
-          organizationId,
-          clientId,
+        pendientes.push({ row, clientId });
+      }
+
+      // ── 3. Traer los comprobantes abiertos de todos los deudores ─────────
+      const clientIds = [...new Set(pendientes.map((p) => p.clientId))];
+      const abiertosPorCliente = new Map<string, OpenInvoice[]>();
+
+      if (clientIds.length > 0) {
+        const abiertos = await tx.invoice.findMany({
+          where: {
+            organizationId,
+            clientId: { in: clientIds },
+            status: { in: ["PENDING", "PARTIAL"] },
+          },
+          // El orden es el FIFO del que depende la imputación, y agrupar por
+          // deudor lo conserva dentro de cada grupo.
+          orderBy: { dueDate: "asc" },
+          select: {
+            id: true,
+            clientId: true,
+            amount: true,
+            paidAmount: true,
+            invoiceNumber: true,
+          },
+        });
+
+        for (const i of abiertos) {
+          const lista = abiertosPorCliente.get(i.clientId) ?? [];
+          lista.push(i);
+          abiertosPorCliente.set(i.clientId, lista);
+        }
+      }
+
+      // ── 4. Imputar en memoria ────────────────────────────────────────────
+      // Por comprobante gana el último cambio: `paidAmount` es acumulado, así
+      // que el último ya incluye lo que aplicaron los cobros anteriores.
+      const cambios = new Map<string, InvoiceChange>();
+      const cobros: { clientId: string; invoiceId: string | null; row: PaymentRow }[] = [];
+
+      for (const { row, clientId } of pendientes) {
+        const abiertos = abiertosPorCliente.get(clientId) ?? [];
+
+        const plan = planificarImputacion(abiertos, {
           amount: row.amount,
           preferredInvoiceNumbers: row.invoiceNumber ? [row.invoiceNumber] : undefined,
         });
 
-        allocated = allocated.plus(appliedAmount);
+        // Lo imputado se refleja en la copia en memoria para que el próximo
+        // cobro del mismo deudor vea la deuda ya bajada, igual que cuando cada
+        // fila releía la base. Dos cobros del mismo deudor en un lote es lo
+        // normal, no un borde.
+        for (const cambio of plan.changes) {
+          const comprobante = abiertos.find((i) => i.id === cambio.invoiceId);
+          if (comprobante) comprobante.paidAmount = cambio.paidAmount;
+          cambios.set(cambio.invoiceId, cambio);
+        }
 
-        if (remaining.greaterThan(0)) {
-          unallocated = unallocated.plus(remaining);
+        allocated = allocated.plus(plan.allocated);
+
+        if (plan.remaining.greaterThan(0)) {
+          unallocated = unallocated.plus(plan.remaining);
           problems.push({
             row: row.rowNumber,
             status: "unapplied",
-            detail:
-              appliedAmount.equals(0)
-                ? "el deudor no tiene comprobantes abiertos; el cobro quedó registrado sin imputar"
-                : `sobraron ${remaining.toString()} sin comprobante contra el cual imputar`,
+            detail: plan.allocated.equals(0)
+              ? "el deudor no tiene comprobantes abiertos; el cobro quedó registrado sin imputar"
+              : `sobraron ${plan.remaining.toString()} sin comprobante contra el cual imputar`,
           });
         }
 
-        // ── 4. Registrar el cobro ───────────────────────────────
-        await tx.payment.create({
-          data: {
-            organizationId,
-            clientId,
-            invoiceId: firstInvoiceId,
-            amount: row.amount,
-            currency,
-            paymentDate: new Date(`${row.paymentDate}T00:00:00Z`),
-            paymentMethod: row.method,
-            reference: row.reference,
-            registeredById,
-          },
-        });
-
+        cobros.push({ clientId, invoiceId: plan.firstInvoiceId, row });
         applied += 1;
-
-        // ── 5. Dejar al deudor consistente ──────────────────────
-        await refreshClientBalance(tx, organizationId, clientId);
       }
+
+      // ── 5. Escribir ──────────────────────────────────────────────────────
+      if (cambios.size > 0) {
+        const lista = [...cambios.values()];
+        await tx.$executeRaw`
+          UPDATE invoices i
+             SET paid_amount = t.paid_amount,
+                 status = t.status::"InvoiceStatus",
+                 updated_at = ${ahora}::timestamptz
+            FROM unnest(
+                   ${lista.map((c) => c.invoiceId)}::uuid[],
+                   ${lista.map((c) => c.paidAmount.toFixed(2))}::numeric[],
+                   ${lista.map((c) => c.status)}::text[]
+                 ) AS t(id, paid_amount, status)
+           WHERE i.id = t.id
+             AND i.organization_id = ${organizationId}::uuid
+        `;
+      }
+
+      if (cobros.length > 0) {
+        await tx.$executeRaw`
+          INSERT INTO payments (
+            id, organization_id, client_id, invoice_id, amount, currency,
+            payment_date, payment_method, reference, registered_by
+          )
+          SELECT gen_random_uuid(), ${organizationId}::uuid, t.client_id,
+                 t.invoice_id, t.amount, ${currency}, t.payment_date,
+                 t.method::"PaymentMethod", t.reference, ${registeredById}::uuid
+            FROM unnest(
+                   ${cobros.map((c) => c.clientId)}::uuid[],
+                   ${cobros.map((c) => c.invoiceId)}::uuid[],
+                   ${cobros.map((c) => c.row.amount.toFixed(2))}::numeric[],
+                   ${cobros.map((c) => c.row.paymentDate)}::date[],
+                   ${cobros.map((c) => c.row.method)}::text[],
+                   ${cobros.map((c) => c.row.reference)}::text[]
+                 ) AS t(client_id, invoice_id, amount, payment_date, method, reference)
+        `;
+      }
+
+      // Un solo recálculo para todos los deudores tocados, en vez de uno por fila.
+      await refreshClientBalances(tx, organizationId, clientIds);
     },
-    // El default de Prisma son 5 segundos: un lote de 200 cobros con varias consultas
-    // cada uno los pasa y abortaria la transaccion entera.
+    // El default de Prisma son 5 segundos, y al pasarlos rechaza el commit: el
+    // lote entero se revierte. Con las escrituras agrupadas sobra, pero el
+    // margen no se deja al azar.
     { timeout: 60_000, maxWait: 15_000 },
   );
 
