@@ -2,8 +2,20 @@ import { z } from "zod";
 
 import { idSchema } from "@/lib/validation/id";
 
-/** Cuántas filas viajan por request. Coincide con el batch de upsert del brief. */
-export const BATCH_SIZE = 500;
+/**
+ * Cuántas filas viajan por request.
+ *
+ * Eran 500 cuando el servidor hacía un upsert por fila y cada lote costaba
+ * segundos. Ahora el lote se escribe en unas pocas sentencias masivas y el costo
+ * por fila es de ~1 ms, así que lo que domina es el ida y vuelta HTTP: con 500
+ * filas, 200.000 son 400 requests seguidos manejados por la pestaña.
+ *
+ * El techo lo pone el límite de body de los server actions (ver next.config.ts),
+ * no la base. Una fila mapeada mide unos 370 bytes medidos sobre una cartera
+ * realista, y hasta ~1,2 KB si trae descripción larga: 1.000 filas entran
+ * cómodas en los 4 MB configurados, incluso en el peor caso.
+ */
+export const BATCH_SIZE = 1000;
 
 const optionalText = (max: number) =>
   z

@@ -85,117 +85,203 @@ export async function importBatch(input: {
 
   const organizationId = session.organization.id;
   const currency = session.organization.currency;
+  const ahora = new Date();
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Por qué esto es SQL a mano y no un upsert de Prisma por fila.
+  //
+  // El costo de importar nunca estuvo en la base: estaba en la cantidad de
+  // viajes. Un upsert del deudor más otro del comprobante son dos o tres idas
+  // y vueltas POR FILA, una después de la otra. Medido contra la base de
+  // prueba: 76,5 ms por fila, de los cuales unos 34 ms son latencia pura de
+  // cada consulta —o sea que la base casi no trabajaba, solo esperábamos—.
+  // Las mismas 500 filas en sentencias masivas: 2,1 ms por fila. 36 veces.
+  // Con 200.000 filas eso es la diferencia entre horas y minutos.
+  //
+  // Así que el lote entero se escribe en unas pocas sentencias de tamaño fijo:
+  // sean 10 filas o 5.000, la cantidad de viajes a la base es la misma.
+  // ───────────────────────────────────────────────────────────────────────────
+
+  // Un deudor aparece una vez por cada cuota que debe, así que dentro de un
+  // lote su external_id viene repetido. `ON CONFLICT DO UPDATE` no tolera la
+  // misma llave dos veces en una sentencia ("cannot affect row a second time"),
+  // y esto no es un caso raro: es lo normal en una cartera. Se deduplica acá, y
+  // gana la última aparición, igual que hacía el bucle que esto reemplaza.
+  const deudores = [...new Map(rows.map((r) => [r.externalId, r])).values()];
+  const comprobantes = [...new Map(rows.map((r) => [r.invoiceNumber, r])).values()];
 
   let clients = 0;
-  let invoices = 0;
 
-  // Todo el lote entra o no entra ninguno: si el request se corta a mitad, no queda
-  // una cartera con la mitad de los comprobantes cargados.
+  // Todo el lote entra o no entra ninguno: si el request se corta a mitad, no
+  // queda una cartera con la mitad de los comprobantes cargados.
+  //
+  // El timeout va explícito porque el default de Prisma son 5 segundos, y al
+  // pasarlos no corta a mitad de camino: deja correr el cuerpo entero y después
+  // **rechaza el commit**, así que el lote se revierte completo. Con el upsert
+  // por fila que había antes, un lote de 500 tardaba 38 s contra esta misma base
+  // —o sea que se revertía siempre— y en producción daba unos 2 s, pasando
+  // raspando. No se vio nunca porque los datos de la demo los pone el seed, no
+  // el importador. Ahora un lote lleno tarda medio segundo, pero el margen no se
+  // deja al azar.
   await prisma.$transaction(async (tx) => {
-    for (const row of rows) {
-      const client = await tx.client.upsert({
-        where: {
-          organizationId_externalId: { organizationId, externalId: row.externalId },
-        },
-        create: {
-          organizationId,
-          portfolioId,
-          externalId: row.externalId,
-          name: row.name,
-          documentNumber: row.documentNumber,
-          email: row.email,
-          phone: row.phone,
-          phoneAlt: row.phoneAlt,
-          currency,
-        },
-        update: {
-          // No se pisa portfolioId ni el estado de gestión: si el deudor ya venía de
-          // otra cartera y alguien lo está trabajando, reimportar no lo reinicia.
-          name: row.name,
-          documentNumber: row.documentNumber,
-          email: row.email,
-          phone: row.phone,
-          phoneAlt: row.phoneAlt,
-        },
-        select: { id: true, createdAt: true, updatedAt: true },
-      });
+    // 1. Deudores.
+    //
+    // `xmax = 0` es cómo Postgres dice "esta fila la insertó esta sentencia, no
+    // la actualizó". Permite contar los deudores nuevos sin una consulta extra.
+    //
+    // portfolio_id NO se actualiza a propósito: si el deudor ya venía de otra
+    // cartera y alguien lo está trabajando, reimportar no lo mueve ni le
+    // reinicia el estado de gestión.
+    const guardados = await tx.$queryRaw<
+      { id: string; external_id: string; nuevo: boolean }[]
+    >`
+      INSERT INTO clients (
+        id, organization_id, portfolio_id, external_id, name,
+        document_number, email, phone, phone_alt, currency, updated_at
+      )
+      SELECT gen_random_uuid(), ${organizationId}::uuid, ${portfolioId}::uuid,
+             t.external_id, t.name, t.document_number, t.email, t.phone,
+             t.phone_alt, ${currency}, ${ahora}::timestamptz
+        FROM unnest(
+               ${deudores.map((r) => r.externalId)}::text[],
+               ${deudores.map((r) => r.name)}::text[],
+               ${deudores.map((r) => r.documentNumber)}::text[],
+               ${deudores.map((r) => r.email)}::text[],
+               ${deudores.map((r) => r.phone)}::text[],
+               ${deudores.map((r) => r.phoneAlt)}::text[]
+             ) AS t(external_id, name, document_number, email, phone, phone_alt)
+      ON CONFLICT (organization_id, external_id) DO UPDATE
+         SET name = EXCLUDED.name,
+             document_number = EXCLUDED.document_number,
+             email = EXCLUDED.email,
+             phone = EXCLUDED.phone,
+             phone_alt = EXCLUDED.phone_alt,
+             updated_at = EXCLUDED.updated_at
+      RETURNING id, external_id, (xmax = 0) AS nuevo
+    `;
 
-      if (client.createdAt.getTime() === client.updatedAt.getTime()) clients += 1;
+    clients = guardados.filter((g) => g.nuevo).length;
 
-      await tx.invoice.upsert({
-        where: {
-          organizationId_invoiceNumber: {
-            organizationId,
-            invoiceNumber: row.invoiceNumber,
-          },
-        },
-        create: {
-          organizationId,
-          clientId: client.id,
-          // La cartera queda en el comprobante, no solo en el deudor: el mismo
-          // deudor puede aparecer en dos importaciones distintas.
-          portfolioId,
-          invoiceNumber: row.invoiceNumber,
-          product: row.product,
-          description: row.description,
-          amount: row.amount,
-          currency,
-          dueDate: new Date(`${row.dueDate}T00:00:00Z`),
-        },
-        update: {
-          clientId: client.id,
-          portfolioId,
-          product: row.product,
-          description: row.description,
-          amount: row.amount,
-          dueDate: new Date(`${row.dueDate}T00:00:00Z`),
-        },
-      });
+    const idPorExternal = new Map(guardados.map((g) => [g.external_id, g.id]));
 
-      // Referencia personal, si la planilla la trae.
-      //
-      // Se busca por nombre antes de crear porque la referencia viene repetida
-      // en cada fila del deudor: una cartera con cuatro cuotas por persona
-      // crearia la misma referencia cuatro veces. No hay unique en la tabla
-      // porque dos personas distintas pueden llamarse igual en carteras
-      // distintas; la deduplicacion es por deudor.
-      if (row.referenceName) {
-        const yaEsta = await tx.clientReference.findFirst({
-          where: { clientId: client.id, name: row.referenceName },
-          select: { id: true },
-        });
+    /** El id del deudor de una fila. Si falta, el lote se cae entero y se revierte. */
+    const deudorDe = (row: MappedRow): string => {
+      const id = idPorExternal.get(row.externalId);
+      if (!id) {
+        throw new Error(`El deudor ${row.externalId} no volvió del insert.`);
+      }
+      return id;
+    };
 
-        if (yaEsta) {
-          await tx.clientReference.update({
-            where: { id: yaEsta.id },
-            data: {
-              phone: row.referencePhone,
-              relation: row.referenceRelation,
-            },
-          });
-        } else {
-          await tx.clientReference.create({
-            data: {
-              organizationId,
-              clientId: client.id,
-              name: row.referenceName,
-              phone: row.referencePhone,
-              relation: row.referenceRelation,
-            },
-          });
-        }
+    // 2. Comprobantes.
+    await tx.$executeRaw`
+      INSERT INTO invoices (
+        id, organization_id, client_id, portfolio_id, invoice_number,
+        product, description, amount, currency, due_date, updated_at
+      )
+      SELECT gen_random_uuid(), ${organizationId}::uuid, t.client_id,
+             ${portfolioId}::uuid, t.invoice_number, t.product, t.description,
+             t.amount, ${currency}, t.due_date, ${ahora}::timestamptz
+        FROM unnest(
+               ${comprobantes.map(deudorDe)}::uuid[],
+               ${comprobantes.map((r) => r.invoiceNumber)}::text[],
+               ${comprobantes.map((r) => r.product)}::text[],
+               ${comprobantes.map((r) => r.description)}::text[],
+               ${comprobantes.map((r) => r.amount.toFixed(2))}::numeric[],
+               ${comprobantes.map((r) => r.dueDate)}::date[]
+             ) AS t(client_id, invoice_number, product, description, amount, due_date)
+      ON CONFLICT (organization_id, invoice_number) DO UPDATE
+         SET client_id = EXCLUDED.client_id,
+             portfolio_id = EXCLUDED.portfolio_id,
+             product = EXCLUDED.product,
+             description = EXCLUDED.description,
+             amount = EXCLUDED.amount,
+             due_date = EXCLUDED.due_date,
+             updated_at = EXCLUDED.updated_at
+    `;
+
+    // 3. Referencias personales, si la planilla las trae.
+    //
+    // No hay unique sobre (client_id, name) —dos personas distintas pueden
+    // llamarse igual en carteras distintas— así que la deduplicación es
+    // explícita: se trae lo que ya existe para estos deudores y se parte en
+    // "actualizar" y "crear". Tres sentencias de tamaño fijo en vez de un
+    // findFirst por fila, que era el único viaje por fila que quedaba.
+    const llave = (clientId: string, name: string) => `${clientId}\u0000${name}`;
+
+    const conReferencia = [
+      ...new Map(
+        rows
+          .filter((r) => r.referenceName)
+          .map((r) => [llave(deudorDe(r), r.referenceName as string), r]),
+      ).entries(),
+    ];
+
+    if (conReferencia.length > 0) {
+      const idsDeudores = [...new Set(conReferencia.map(([, r]) => deudorDe(r)))];
+
+      const existentes = await tx.$queryRaw<
+        { id: string; client_id: string; name: string }[]
+      >`
+        SELECT id, client_id, name
+          FROM client_references
+         WHERE client_id = ANY(${idsDeudores}::uuid[])
+      `;
+
+      const idExistente = new Map(
+        existentes.map((e) => [llave(e.client_id, e.name), e.id]),
+      );
+
+      const aActualizar: { id: string; row: MappedRow }[] = [];
+      const aCrear: MappedRow[] = [];
+
+      for (const [clave, row] of conReferencia) {
+        const id = idExistente.get(clave);
+        if (id) aActualizar.push({ id, row });
+        else aCrear.push(row);
       }
 
-      invoices += 1;
+      if (aActualizar.length > 0) {
+        await tx.$executeRaw`
+          UPDATE client_references r
+             SET phone = t.phone,
+                 relation = t.relation,
+                 updated_at = ${ahora}::timestamptz
+            FROM unnest(
+                   ${aActualizar.map((a) => a.id)}::uuid[],
+                   ${aActualizar.map((a) => a.row.referencePhone)}::text[],
+                   ${aActualizar.map((a) => a.row.referenceRelation)}::text[]
+                 ) AS t(id, phone, relation)
+           WHERE r.id = t.id
+        `;
+      }
+
+      if (aCrear.length > 0) {
+        await tx.$executeRaw`
+          INSERT INTO client_references (
+            id, organization_id, client_id, name, phone, relation, updated_at
+          )
+          SELECT gen_random_uuid(), ${organizationId}::uuid, t.client_id,
+                 t.name, t.phone, t.relation, ${ahora}::timestamptz
+            FROM unnest(
+                   ${aCrear.map(deudorDe)}::uuid[],
+                   ${aCrear.map((r) => r.referenceName)}::text[],
+                   ${aCrear.map((r) => r.referencePhone)}::text[],
+                   ${aCrear.map((r) => r.referenceRelation)}::text[]
+                 ) AS t(client_id, name, phone, relation)
+        `;
+      }
     }
 
     await tx.portfolio.update({
       where: { id: portfolioId },
       data: { status: "PROCESSING" },
     });
-  });
+  }, { timeout: 60_000, maxWait: 15_000 });
 
-  return { ok: true, clients, invoices };
+  // Cuenta comprobantes distintos, no filas: si la planilla repite un número de
+  // comprobante, se escribió uno solo y eso es lo que se informa.
+  return { ok: true, clients, invoices: comprobantes.length };
 }
 
 /**
