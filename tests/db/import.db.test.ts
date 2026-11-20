@@ -509,9 +509,170 @@ describe("cierre de la carga", () => {
 
     const cartera = await prisma.portfolio.findUnique({
       where: { id: ctx.portfolioId },
-      select: { status: true, totalClients: true },
+      select: { status: true, totalClients: true, totalAmount: true },
     });
     expect(cartera?.status).toBe("ACTIVE");
     expect(cartera?.totalClients).toBe(1);
+    expect(Number(cartera?.totalAmount)).toBe(1_000_000);
+  });
+
+  it("reimportar en otra cartera deja las dos con números ciertos", async () => {
+    // Este es el caso que se veía mal en pantalla: al reimportar, el deudor se
+    // queda a propósito en su cartera original y el comprobante se muda a la
+    // nueva. Contando los deudores por client.portfolio_id, la cartera nueva
+    // mostraba "0 deudores" teniendo todos los comprobantes, y la vieja mostraba
+    // sus deudores de siempre sin un guaraní de deuda.
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [fila({ externalId: "C-1", invoiceNumber: "F-1", amount: 400_000 })],
+    });
+    await finalizePortfolio(ctx.portfolioId);
+
+    const nueva = await prisma.portfolio.create({
+      data: { organizationId: ctx.organizationId, name: "Cartera corregida" },
+      select: { id: true },
+    });
+
+    await importBatch({
+      portfolioId: nueva.id,
+      rows: [fila({ externalId: "C-1", invoiceNumber: "F-1", amount: 900_000 })],
+    });
+    await finalizePortfolio(nueva.id);
+
+    const vieja = await prisma.portfolio.findUnique({
+      where: { id: ctx.portfolioId },
+      select: { totalClients: true, totalAmount: true },
+    });
+    const actual = await prisma.portfolio.findUnique({
+      where: { id: nueva.id },
+      select: { totalClients: true, totalAmount: true },
+    });
+
+    // La nueva tiene el comprobante, así que tiene el deudor y el monto.
+    expect(actual?.totalClients).toBe(1);
+    expect(Number(actual?.totalAmount)).toBe(900_000);
+
+    // Y la vieja, que se quedó sin comprobantes, va a cero en vez de conservar
+    // los totales de su propia carga.
+    expect(vieja?.totalClients).toBe(0);
+    expect(Number(vieja?.totalAmount)).toBe(0);
+  });
+
+  it("recalcula la deuda del deudor reimportado aunque esté en otra cartera", async () => {
+    // El bug grave detrás del contador: el recálculo filtraba por
+    // client.portfolio_id, así que al reimportar en una cartera nueva la deuda
+    // del deudor no se tocaba. Quedaba la planilla nueva escrita y el total
+    // viejo intacto.
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [fila({ externalId: "C-1", invoiceNumber: "F-1", amount: 400_000 })],
+    });
+    await finalizePortfolio(ctx.portfolioId);
+
+    const nueva = await prisma.portfolio.create({
+      data: { organizationId: ctx.organizationId, name: "Segunda carga" },
+      select: { id: true },
+    });
+
+    // Misma deuda corregida a 900.000, más una cuota nueva.
+    await importBatch({
+      portfolioId: nueva.id,
+      rows: [
+        fila({ externalId: "C-1", invoiceNumber: "F-1", amount: 900_000 }),
+        fila({ externalId: "C-1", invoiceNumber: "F-2", amount: 100_000 }),
+      ],
+    });
+    await finalizePortfolio(nueva.id);
+
+    const deudor = await prisma.client.findFirst({
+      where: { organizationId: ctx.organizationId, externalId: "C-1" },
+      select: { totalDebt: true, portfolioId: true },
+    });
+
+    // Sigue en su cartera original...
+    expect(deudor?.portfolioId).toBe(ctx.portfolioId);
+    // ...pero su deuda está al día.
+    expect(Number(deudor?.totalDebt)).toBe(1_000_000);
+  });
+
+  it("un deudor sin comprobantes abiertos queda en cero", async () => {
+    // Antes esto no pasaba: el agregado usaba un JOIN interno sobre los
+    // comprobantes abiertos, así que un deudor que no tenía ninguno no llegaba a
+    // la consulta y conservaba su deuda anterior. El COALESCE no lo cubría,
+    // porque no llegaba una fila en cero: no llegaba ninguna.
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [fila({ externalId: "C-1", invoiceNumber: "F-1", amount: 500_000 })],
+    });
+    await finalizePortfolio(ctx.portfolioId);
+
+    const antes = await prisma.client.findFirst({
+      where: { organizationId: ctx.organizationId, externalId: "C-1" },
+      select: { totalDebt: true },
+    });
+    expect(Number(antes?.totalDebt)).toBe(500_000);
+
+    // El comprobante se cobra y se vuelve a cerrar la carga.
+    await prisma.invoice.updateMany({
+      where: { organizationId: ctx.organizationId, invoiceNumber: "F-1" },
+      data: { status: "PAID", paidAmount: 500_000 },
+    });
+    await finalizePortfolio(ctx.portfolioId);
+
+    const despues = await prisma.client.findFirst({
+      where: { organizationId: ctx.organizationId, externalId: "C-1" },
+      select: { totalDebt: true },
+    });
+    expect(Number(despues?.totalDebt)).toBe(0);
+
+    // Y la cartera, que sigue teniendo el comprobante pero ya cobrado, informa
+    // su deudor con monto cero.
+    const cartera = await prisma.portfolio.findUnique({
+      where: { id: ctx.portfolioId },
+      select: { totalClients: true, totalAmount: true },
+    });
+    expect(cartera?.totalClients).toBe(1);
+    expect(Number(cartera?.totalAmount)).toBe(0);
+  });
+
+  it("el monto de una cartera es el de sus comprobantes, sin contar dos veces", async () => {
+    // Un deudor que debe en dos carteras tiene una sola total_debt, que es toda
+    // su deuda. Sumar esa cifra en las dos carteras inflaba las dos; ahora cada
+    // una informa lo suyo y los totales se pueden sumar.
+    const otra = await prisma.portfolio.create({
+      data: { organizationId: ctx.organizationId, name: "Prendaria" },
+      select: { id: true },
+    });
+
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [fila({ externalId: "C-1", invoiceNumber: "F-1", amount: 300_000 })],
+    });
+    await importBatch({
+      portfolioId: otra.id,
+      rows: [fila({ externalId: "C-1", invoiceNumber: "F-2", amount: 700_000 })],
+    });
+    await finalizePortfolio(otra.id);
+
+    const a = await prisma.portfolio.findUnique({
+      where: { id: ctx.portfolioId },
+      select: { totalAmount: true, totalClients: true },
+    });
+    const b = await prisma.portfolio.findUnique({
+      where: { id: otra.id },
+      select: { totalAmount: true, totalClients: true },
+    });
+
+    expect(Number(a?.totalAmount)).toBe(300_000);
+    expect(Number(b?.totalAmount)).toBe(700_000);
+    expect(a?.totalClients).toBe(1);
+    expect(b?.totalClients).toBe(1);
+
+    // El deudor, en cambio, debe el total de las dos.
+    const deudor = await prisma.client.findFirst({
+      where: { organizationId: ctx.organizationId, externalId: "C-1" },
+      select: { totalDebt: true },
+    });
+    expect(Number(deudor?.totalDebt)).toBe(1_000_000);
   });
 });

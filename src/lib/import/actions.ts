@@ -301,42 +301,98 @@ export async function finalizePortfolio(
 
   if (!portfolio) return { ok: false, error: "La cartera no existe." };
 
-  // total_debt del cliente = suma de sus comprobantes abiertos. Acá sí se recalcula
-  // (a diferencia del cron diario, que no lo toca): el importador ES la fuente de
-  // ese número.
+  // total_debt del deudor = suma de sus comprobantes abiertos. Acá sí se
+  // recalcula (a diferencia del cron diario, que no lo toca): el importador ES la
+  // fuente de ese número.
+  //
+  // Los deudores que toca esta carga son los que tienen comprobantes EN ella, no
+  // los que tienen portfolio_id apuntando acá. La diferencia importa al
+  // reimportar: el deudor se queda a propósito en su cartera original y el
+  // comprobante nuevo va a la nueva, así que filtrar por portfolio_id dejaba la
+  // deuda de todos los deudores reimportados sin recalcular —con la planilla
+  // nueva ya escrita y el total viejo intacto—.
   await prisma.$executeRaw`
     UPDATE clients c
-       SET total_debt = COALESCE(agg.total, 0),
+       SET total_debt = agg.total,
            updated_at = now()
       FROM (
-        SELECT cl.id,
-               SUM(i.amount - i.paid_amount) AS total
-          FROM clients cl
-          JOIN invoices i ON i.client_id = cl.id
-                         AND i.status IN ('PENDING', 'PARTIAL')
-         WHERE cl.organization_id = ${organizationId}::uuid
-           AND cl.portfolio_id = ${portfolioId}::uuid
-         GROUP BY cl.id
+        SELECT t.client_id AS id,
+               -- FILTER y LEFT JOIN en vez de un JOIN con WHERE: un deudor que
+               -- quedó con todos los comprobantes cerrados tiene que ir a 0, y
+               -- con el join interno desaparecía de la consulta y se quedaba con
+               -- la deuda anterior. El COALESCE de antes no lo cubría: nunca
+               -- llegaba una fila con total nulo, simplemente no llegaba ninguna.
+               COALESCE(
+                 SUM(i.amount - i.paid_amount)
+                   FILTER (WHERE i.status IN ('PENDING', 'PARTIAL')),
+                 0
+               ) AS total
+          FROM (
+            SELECT DISTINCT client_id
+              FROM invoices
+             WHERE organization_id = ${organizationId}::uuid
+               AND portfolio_id = ${portfolioId}::uuid
+          ) t
+          -- Sin filtrar por cartera: la deuda de una persona es todo lo que debe,
+          -- no lo que debe en esta carga.
+          LEFT JOIN invoices i ON i.client_id = t.client_id
+         GROUP BY t.client_id
       ) agg
      WHERE c.id = agg.id
+       AND c.organization_id = ${organizationId}::uuid
   `;
 
   // Deja días de mora y prioridad al día sin esperar al cron de las 03:15.
   await prisma.$executeRaw`SELECT public.refresh_overdue_and_priority()`;
 
-  const totals = await prisma.client.aggregate({
-    where: { organizationId, portfolioId },
-    _count: { id: true },
-    _sum: { totalDebt: true },
-  });
+  // Los totales de la cartera se calculan sobre SUS comprobantes, no sobre el
+  // total_debt de los deudores.
+  //
+  // Antes se contaban los deudores con portfolio_id en esta cartera y se sumaba
+  // su total_debt. Eso daba dos números que no cerraban: al reimportar, la
+  // cartera nueva mostraba "0 deudores" —los deudores seguían en la original—
+  // mientras tenía todos los comprobantes, y la vieja mostraba todos los
+  // deudores sin un guaraní de deuda. Y un deudor que debe en dos carteras tiene
+  // una sola total_debt, que es toda su deuda: sumarla en las dos inflaba las
+  // dos. Así los totales de dos carteras se pueden sumar sin contar nada dos
+  // veces.
+  // Se recalculan los totales de TODAS las carteras de la organización, no solo
+  // la que se acaba de cargar. Al reimportar, los comprobantes se mudan a la
+  // cartera nueva y la vieja se queda con totales que ya no son ciertos y que
+  // nadie más vuelve a tocar: mostraba sus deudores de siempre y la deuda de
+  // entonces, sin tener un solo comprobante. Son unas pocas carteras por
+  // organización y el índice parcial sobre invoices(portfolio_id) resuelve cada
+  // una por índice, así que se paga una vez por carga y queda todo coherente.
+  await prisma.$executeRaw`
+    UPDATE portfolios p
+       SET total_clients = agg.clientes,
+           total_amount = agg.monto
+      FROM (
+        SELECT p2.id,
+               count(DISTINCT i.client_id)::int AS clientes,
+               COALESCE(
+                 SUM(i.amount - i.paid_amount)
+                   FILTER (WHERE i.status IN ('PENDING', 'PARTIAL')),
+                 0
+               ) AS monto
+          FROM portfolios p2
+          -- LEFT JOIN para que una cartera que se quedó sin comprobantes vaya a
+          -- cero en vez de quedar fuera de la consulta con los totales viejos.
+          LEFT JOIN invoices i ON i.portfolio_id = p2.id
+         WHERE p2.organization_id = ${organizationId}::uuid
+         GROUP BY p2.id
+      ) agg
+     WHERE p.id = agg.id
+  `;
 
-  const totalClients = totals._count.id;
-  const totalAmount = Number(totals._sum.totalDebt ?? 0);
-
-  await prisma.portfolio.update({
+  const activada = await prisma.portfolio.update({
     where: { id: portfolioId },
-    data: { status: "ACTIVE", totalClients, totalAmount },
+    data: { status: "ACTIVE" },
+    select: { totalClients: true, totalAmount: true },
   });
+
+  const totalClients = activada.totalClients;
+  const totalAmount = Number(activada.totalAmount);
 
   revalidatePath("/portfolio");
   revalidatePath("/overview");
