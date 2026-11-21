@@ -46,6 +46,13 @@ export const mappedRowSchema = z.object({
   amount: z.number().finite().min(0).max(1e15),
   // ISO estricto: cualquier ambigüedad de formato se resolvió en el cliente.
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "fecha inválida"),
+  // Código ISO ya normalizado por parse-values. Nulo = la de la organización.
+  currency: z
+    .string()
+    .trim()
+    .regex(/^[A-Z]{3}$/)
+    .nullish()
+    .transform((v) => (v ? v : null)),
   description: optionalText(500),
   referenceName: optionalText(120),
   referencePhone: optionalText(40),

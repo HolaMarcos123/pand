@@ -13,6 +13,42 @@ export type ImportResult =
   | { ok: false; error: string };
 
 /**
+ * Dos filas describen la misma deuda, y no dos deudas distintas que comparten
+ * número de comprobante.
+ *
+ * Se comparan los campos que identifican la deuda y no los de contacto: una
+ * planilla puede traer la fila del deudor repetida con el teléfono corregido, y
+ * eso no la convierte en otra deuda.
+ */
+function mismaDeuda(a: MappedRow, b: MappedRow): boolean {
+  return (
+    a.externalId === b.externalId &&
+    a.amount === b.amount &&
+    a.dueDate === b.dueDate &&
+    // La moneda entra en la comparación: 500 dólares y 500 guaraníes son la
+    // misma cifra y deudas que no se parecen en nada.
+    a.currency === b.currency
+  );
+}
+
+/**
+ * El mismo deudor trae dos veces el mismo numero de comprobante, con deudas
+ * distintas. No se puede elegir una sin perder la otra.
+ */
+function errorDeComprobanteRepetido(numero: string, externalId: string): ImportResult {
+  return {
+    ok: false,
+    error:
+      `El deudor ${externalId} trae dos veces el comprobante "${numero}" con montos o ` +
+      "vencimientos distintos, así que no se puede saber cuál es la deuda. Dos causas " +
+      "habituales: que la columna mapeada a “Nro. de comprobante” no sea la del " +
+      "identificador —si quedó apuntando a una de montos, por ejemplo—, o que el deudor " +
+      "tenga dos créditos cuyas cuotas se numeran igual, y entonces el número tiene que " +
+      "distinguirlos.",
+  };
+}
+
+/**
  * Crea la cartera vacía en estado UPLOADING. Las filas llegan después, por lotes.
  */
 export async function createPortfolio(input: {
@@ -103,12 +139,43 @@ export async function importBatch(input: {
   // ───────────────────────────────────────────────────────────────────────────
 
   // Un deudor aparece una vez por cada cuota que debe, así que dentro de un
+  // Un deudor aparece una vez por cada cuota que debe, así que dentro de un
   // lote su external_id viene repetido. `ON CONFLICT DO UPDATE` no tolera la
   // misma llave dos veces en una sentencia ("cannot affect row a second time"),
   // y esto no es un caso raro: es lo normal en una cartera. Se deduplica acá, y
   // gana la última aparición, igual que hacía el bucle que esto reemplaza.
   const deudores = [...new Map(rows.map((r) => [r.externalId, r])).values()];
-  const comprobantes = [...new Map(rows.map((r) => [r.invoiceNumber, r])).values()];
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // El comprobante se identifica por deudor + número, no por número solo.
+  //
+  // Esto costó una cartera real. En un cuotero la columna del comprobante es
+  // "1/60" —cuota 1 de 60— y la tienen TODOS los deudores: la cuota 1/60 de una
+  // persona y la de otra son dos deudas distintas que comparten nombre. Mientras
+  // el número fue único por organización, importar un cuotero colapsaba todas
+  // esas cuotas en un solo comprobante y se las atribuía al último deudor de la
+  // planilla. De unas 4.000 filas entraron 1.576 comprobantes y 2.696 deudores
+  // quedaron sin ninguna deuda, con la pantalla informando que todo salió bien.
+  //
+  // Deduplicar sigue estando bien cuando la planilla repite la MISMA fila. Lo
+  // que no se hace es mezclar dos deudas distintas: si el mismo deudor trae dos
+  // veces el mismo número de comprobante con montos o vencimientos distintos, no
+  // hay forma de saber cuál es la deuda, y el lote se rechaza diciendo cuál es.
+  // ───────────────────────────────────────────────────────────────────────────
+  const claveDeuda = (row: MappedRow) => `${row.externalId}\u0000${row.invoiceNumber}`;
+
+  const porComprobante = new Map<string, MappedRow>();
+  for (const row of rows) {
+    const clave = claveDeuda(row);
+    const previa = porComprobante.get(clave);
+
+    if (previa && !mismaDeuda(previa, row)) {
+      return errorDeComprobanteRepetido(row.invoiceNumber, row.externalId);
+    }
+
+    porComprobante.set(clave, row);
+  }
+  const comprobantes = [...porComprobante.values()];
 
   let clients = 0;
 
@@ -181,21 +248,30 @@ export async function importBatch(input: {
       )
       SELECT gen_random_uuid(), ${organizationId}::uuid, t.client_id,
              ${portfolioId}::uuid, t.invoice_number, t.product, t.description,
-             t.amount, ${currency}, t.due_date, ${ahora}::timestamptz
+             -- La moneda sale de la fila cuando la planilla la trae. Si no, la de
+             -- la organización: es el caso de una cartera de una sola moneda, que
+             -- es lo más común. Lo que no se hace es adivinarla cuando la columna
+             -- está mapeada pero el valor no se entiende — eso lo rechaza
+             -- parse-values, porque una deuda en dólares guardada como guaraníes
+             -- queda 7.000 veces más chica y nadie se entera.
+             t.amount, COALESCE(t.currency, ${currency}), t.due_date,
+             ${ahora}::timestamptz
         FROM unnest(
                ${comprobantes.map(deudorDe)}::uuid[],
                ${comprobantes.map((r) => r.invoiceNumber)}::text[],
                ${comprobantes.map((r) => r.product)}::text[],
                ${comprobantes.map((r) => r.description)}::text[],
                ${comprobantes.map((r) => r.amount.toFixed(2))}::numeric[],
-               ${comprobantes.map((r) => r.dueDate)}::date[]
-             ) AS t(client_id, invoice_number, product, description, amount, due_date)
-      ON CONFLICT (organization_id, invoice_number) DO UPDATE
-         SET client_id = EXCLUDED.client_id,
-             portfolio_id = EXCLUDED.portfolio_id,
+               ${comprobantes.map((r) => r.dueDate)}::date[],
+               ${comprobantes.map((r) => r.currency)}::text[]
+             ) AS t(client_id, invoice_number, product, description, amount,
+                    due_date, currency)
+      ON CONFLICT (organization_id, client_id, invoice_number) DO UPDATE
+         SET portfolio_id = EXCLUDED.portfolio_id,
              product = EXCLUDED.product,
              description = EXCLUDED.description,
              amount = EXCLUDED.amount,
+             currency = EXCLUDED.currency,
              due_date = EXCLUDED.due_date,
              updated_at = EXCLUDED.updated_at
     `;

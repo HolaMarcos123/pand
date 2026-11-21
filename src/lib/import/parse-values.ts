@@ -158,3 +158,42 @@ function buildDate(
 
   return { ok: true, value: date };
 }
+
+/**
+ * Moneda. Acepta el código, el símbolo y el nombre, como lo escribe cualquiera.
+ *
+ * "USD" · "US$" · "u$s" · "dólar" · "dolares" · "$"
+ * "PYG" · "Gs." · "G$" · "₲" · "guaraníes" · "gs"
+ *
+ * El "$" suelto se lee como dólar y no como peso: en Paraguay, que es para quién
+ * está escrito esto, el guaraní se escribe "Gs." y el "$" se usa para el dólar.
+ * Un peso argentino se escribe "ARS" o "$ARS" en una planilla que los distinga.
+ *
+ * Devolver la moneda inválida como error y no caer a la de la organización es a
+ * propósito: una columna de moneda que no se entiende significa que el mapeo está
+ * mal o que el dato viene sucio, y adivinar "guaraníes" convertiría una deuda en
+ * dólares en una deuda 7.000 veces más chica, sin que nadie se entere.
+ */
+export function parseCurrency(raw: unknown): ParseResult<string> {
+  if (raw === null || raw === undefined) return EMPTY;
+
+  const texto = String(raw).trim();
+  if (!texto) return EMPTY;
+
+  const limpio = texto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[\s.]/g, "");
+
+  if (/^(usd|us\$|u\$s|u\$|\$us|dolar(es)?|dol|\$)$/.test(limpio)) return { ok: true, value: "USD" };
+  if (/^(pyg|gs|g\$|₲|guarani(es)?|gua|gy)$/.test(limpio)) return { ok: true, value: "PYG" };
+  if (/^(ars|\$ars|peso(s)?(argentino(s)?)?)$/.test(limpio)) return { ok: true, value: "ARS" };
+  if (/^(brl|r\$|real(es)?)$/.test(limpio)) return { ok: true, value: "BRL" };
+
+  return {
+    ok: false,
+    empty: false,
+    reason: `moneda no reconocida: "${texto}"`,
+  };
+}

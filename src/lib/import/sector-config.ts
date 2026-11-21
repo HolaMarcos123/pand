@@ -13,12 +13,13 @@ export type FieldKey =
   | "product"
   | "amount"
   | "dueDate"
+  | "currency"
   | "description"
   | "referenceName"
   | "referencePhone"
   | "referenceRelation";
 
-export type FieldType = "text" | "number" | "date";
+export type FieldType = "text" | "number" | "date" | "currency";
 
 export type FieldDef = {
   key: FieldKey;
@@ -59,6 +60,13 @@ const BASE: FieldDef[] = [
   },
   { key: "amount", label: "Monto", type: "number", required: true },
   { key: "dueDate", label: "Vencimiento", type: "date", required: true },
+  {
+    key: "currency",
+    label: "Moneda",
+    type: "currency",
+    required: false,
+    hint: "Si la planilla mezcla guaraníes y dólares, mapeá esta columna. Sin ella, todo entra en la moneda de la organización — y una deuda en dólares guardada como guaraníes queda 7.000 veces más chica.",
+  },
   { key: "description", label: "Descripción", type: "text", required: false },
   {
     key: "referenceName",
@@ -141,6 +149,7 @@ const ALIASES: Record<FieldKey, string[]> = {
   product: ["producto", "articulo", "item", "bien", "linea", "lineacredito", "plan", "servicio", "tipoproducto", "product"],
   amount: ["monto", "importe", "saldo", "deuda", "total", "montocuota", "amount", "valor"],
   dueDate: ["vencimiento", "fechavencimiento", "fechavto", "vto", "duedate", "fecha"],
+  currency: ["moneda", "divisa", "currency", "mon", "tipomoneda", "monedacredito"],
   description: ["descripcion", "detalle", "concepto", "observacion", "description"],
   referenceName: ["referencia", "nombrereferencia", "referencianombre", "contactoreferencia", "garante", "nombregarante"],
   referencePhone: ["telefonoreferencia", "referenciatelefono", "telreferencia", "telefonogarante", "celularreferencia"],

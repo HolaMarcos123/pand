@@ -295,7 +295,10 @@ model Invoice {
   portfolio    Portfolio?   @relation(fields: [portfolioId], references: [id], onDelete: SetNull)
   payments     Payment[]
 
-  @@unique([organizationId, invoiceNumber])
+  // Unico por DEUDOR y no por organizacion: en un cuotero el numero del
+  // comprobante es "1/60" —cuota 1 de 60— y lo tienen todos los deudores. Ver
+  // la migracion 20261121100000 para que paso cuando era unico por organizacion.
+  @@unique([organizationId, clientId, invoiceNumber])
   @@index([organizationId])
   @@index([clientId])
   @@index([dueDate])

@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionData } from "@/lib/auth/session";
 import { resolverSettings } from "@/lib/config/settings";
 import { BATCH_SIZE, type MappedRow } from "@/lib/import/row-schema";
+import { getClients } from "@/lib/queries/clients";
+import { getClientDetail } from "@/lib/queries/tasks";
 import { prisma } from "@/lib/prisma";
 
 import {
@@ -82,6 +84,7 @@ function fila(over: Partial<MappedRow> & Pick<MappedRow, "externalId" | "invoice
     product: null,
     amount: 1_000_000,
     dueDate: "2026-08-15",
+    currency: null,
     description: null,
     referenceName: null,
     referencePhone: null,
@@ -164,6 +167,79 @@ describe("escritura del lote", () => {
     ).toBe(BATCH_SIZE);
   });
 
+  it("un cuotero: dos deudores con la cuota 1/60 son dos deudas", async () => {
+    // El caso que costó una cartera real. En un cuotero la columna del
+    // comprobante es "1/60" y la tienen todos los deudores. Mientras el número
+    // fue único por organización, estas dos filas se colapsaban en un solo
+    // comprobante atribuido al último deudor, y el primero quedaba sin deuda.
+    const res = await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [
+        fila({ externalId: "C-1", invoiceNumber: "1/60", amount: 500_000 }),
+        fila({ externalId: "C-2", invoiceNumber: "1/60", amount: 700_000 }),
+        fila({ externalId: "C-1", invoiceNumber: "2/60", amount: 500_000 }),
+        fila({ externalId: "C-2", invoiceNumber: "2/60", amount: 700_000 }),
+      ],
+    });
+
+    expect(res).toEqual({ ok: true, clients: 2, invoices: 4 });
+
+    // Cada deudor con sus dos cuotas, y ninguno sin deuda.
+    for (const [externalId, monto] of [
+      ["C-1", 500_000],
+      ["C-2", 700_000],
+    ] as const) {
+      const deudor = await prisma.client.findFirst({
+        where: { organizationId: ctx.organizationId, externalId },
+        select: {
+          invoices: {
+            select: { invoiceNumber: true, amount: true },
+            orderBy: { invoiceNumber: "asc" },
+          },
+        },
+      });
+      expect(deudor?.invoices.map((i) => i.invoiceNumber)).toEqual(["1/60", "2/60"]);
+      // Y con SU monto, no el del otro.
+      expect(deudor?.invoices.every((i) => Number(i.amount) === monto)).toBe(true);
+    }
+  });
+
+  it("el mismo deudor con la misma cuota dos veces y montos distintos se rechaza", async () => {
+    // Acá no hay forma de elegir sin perder una deuda, así que no se elige:
+    // se rechaza el lote y se dice de quién es el comprobante.
+    const res = await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [
+        fila({ externalId: "C-1", invoiceNumber: "1/60", amount: 500_000 }),
+        fila({ externalId: "C-1", invoiceNumber: "1/60", amount: 900_000 }),
+      ],
+    });
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).toContain("C-1");
+    expect(res.error).toContain("1/60");
+
+    // Y no quedó nada escrito.
+    expect(
+      await prisma.client.count({ where: { organizationId: ctx.organizationId } }),
+    ).toBe(0);
+  });
+
+  it("la misma fila repetida en la planilla no molesta", async () => {
+    // Una planilla puede traer la fila duplicada tal cual. Si describe la misma
+    // deuda, se deduplica y entra una vez: eso no es perder nada.
+    const res = await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [
+        fila({ externalId: "C-1", invoiceNumber: "1/60", amount: 500_000 }),
+        fila({ externalId: "C-1", invoiceNumber: "1/60", amount: 500_000 }),
+      ],
+    });
+
+    expect(res).toEqual({ ok: true, clients: 1, invoices: 1 });
+  });
+
   it("rechaza un lote más grande que el máximo", async () => {
     const rows = Array.from({ length: BATCH_SIZE + 1 }, (_, i) =>
       fila({ externalId: `C-${i}`, invoiceNumber: `F-${i}` }),
@@ -208,6 +284,81 @@ describe("escritura del lote", () => {
       select: { portfolioId: true },
     });
     expect(comprobante?.portfolioId).toBe(ctx.portfolioId);
+  });
+});
+
+describe("moneda", () => {
+  it("guarda la moneda que trae la fila", async () => {
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [
+        fila({ externalId: "C-1", invoiceNumber: "1/12", amount: 500, currency: "USD" }),
+        fila({ externalId: "C-2", invoiceNumber: "1/12", amount: 3_500_000, currency: "PYG" }),
+      ],
+    });
+
+    const comprobantes = await prisma.invoice.findMany({
+      where: { organizationId: ctx.organizationId },
+      select: { currency: true, amount: true },
+      orderBy: { amount: "asc" },
+    });
+
+    expect(comprobantes.map((c) => c.currency)).toEqual(["USD", "PYG"]);
+  });
+
+  it("sin moneda en la fila usa la de la organización", async () => {
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [fila({ externalId: "C-1", invoiceNumber: "1/12" })],
+    });
+
+    const c = await prisma.invoice.findFirst({
+      where: { organizationId: ctx.organizationId },
+      select: { currency: true },
+    });
+    expect(c?.currency).toBe("PYG");
+  });
+
+  it("un deudor puede deber en dos monedas sin que se sumen", async () => {
+    // 500 dólares y 500.000 guaraníes no son 500.500 de nada. La lista informa
+    // la moneda principal —la que concentra más saldo— con su propio total, y
+    // avisa que hay otra.
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [
+        fila({ externalId: "C-1", invoiceNumber: "USD-1/12", amount: 500, currency: "USD" }),
+        fila({ externalId: "C-1", invoiceNumber: "PYG-1/12", amount: 500_000, currency: "PYG" }),
+      ],
+    });
+    await finalizePortfolio(ctx.portfolioId);
+
+    const detalle = await getClientDetail(
+      ctx.organizationId,
+      (await prisma.client.findFirstOrThrow({
+        where: { organizationId: ctx.organizationId, externalId: "C-1" },
+        select: { id: true },
+      })).id,
+    );
+
+    // La ficha los muestra separados, de mayor a menor saldo.
+    expect(detalle?.saldos).toHaveLength(2);
+    const porMoneda = new Map(detalle?.saldos.map((s) => [s.currency, s.total]));
+    expect(porMoneda.get("USD")).toBe(500);
+    expect(porMoneda.get("PYG")).toBe(500_000);
+
+    // Y la lista informa la principal por saldo —guaraníes— con SU total, no la
+    // suma de las dos.
+    const { rows: lista } = await getClients(
+      ctx.organizationId,
+      ctx.adminId,
+      "ADMIN",
+      {},
+      1,
+    );
+    const row = lista.find((r) => r.externalId === "C-1");
+    expect(row?.moneda).toBe("PYG");
+    expect(row?.totalDebt).toBe(500_000);
+    expect(row?.monedas).toBe(2);
   });
 });
 

@@ -130,3 +130,67 @@ describe("validatePaymentRows — cobros", () => {
     expect(valid[0]?.method).toBe("OTHER");
   });
 });
+
+describe("validateRows — moneda", () => {
+  const MAPEO_CON_MONEDA = { ...MAPEO, currency: "Moneda" };
+
+  it("normaliza el código, el símbolo y el nombre", () => {
+    const casos: [string, string][] = [
+      ["USD", "USD"],
+      ["us$", "USD"],
+      ["U$S", "USD"],
+      ["dólares", "USD"],
+      ["$", "USD"],
+      ["Gs.", "PYG"],
+      ["gs", "PYG"],
+      ["₲", "PYG"],
+      ["Guaraníes", "PYG"],
+      ["PYG", "PYG"],
+    ];
+
+    for (const [escrito, esperado] of casos) {
+      const { valid, errors } = validateRows(
+        [fila({ Moneda: escrito })],
+        MAPEO_CON_MONEDA,
+        CAMPOS,
+      );
+      expect(errors, `"${escrito}" deberia entrar`).toHaveLength(0);
+      expect(valid[0]?.currency, `"${escrito}"`).toBe(esperado);
+    }
+  });
+
+  it("una moneda vacía la resuelve el servidor, no el parser", () => {
+    const { valid, errors } = validateRows(
+      [fila({ Moneda: "" })],
+      MAPEO_CON_MONEDA,
+      CAMPOS,
+    );
+    expect(errors).toHaveLength(0);
+    // Nulo, no "PYG": la moneda de la organización la pone el servidor, que es
+    // el único que la conoce.
+    expect(valid[0]?.currency).toBeNull();
+  });
+
+  it("una moneda que no se entiende descarta la fila en vez de adivinar", () => {
+    // Si la columna está mapeada pero el valor no se reconoce, caer a la moneda
+    // de la organización convertiría una deuda en dólares en una 7.000 veces
+    // más chica, sin que nadie se entere.
+    const { valid, errors } = validateRows(
+      [fila({ Moneda: "euros" })],
+      MAPEO_CON_MONEDA,
+      CAMPOS,
+    );
+    expect(valid).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.field).toBe("Moneda");
+    expect(errors[0]?.message).toContain("euros");
+    // Con el número de fila que la persona ve en Excel.
+    expect(errors[0]?.row).toBe(2);
+  });
+
+  it("sin la columna mapeada no exige nada", () => {
+    const { valid, errors } = validateRows([fila()], MAPEO, CAMPOS);
+    expect(errors).toHaveLength(0);
+    expect(valid[0]?.currency).toBeNull();
+  });
+});

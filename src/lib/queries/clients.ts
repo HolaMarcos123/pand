@@ -15,14 +15,36 @@ export const CLIENTS_PER_PAGE = 25;
  */
 const MORA_LATERAL = Prisma.sql`
   LEFT JOIN LATERAL (
+    -- La moneda que define la conversación: la que concentra más saldo abierto.
+    --
+    -- Antes salía de un MIN(), que con un deudor que debe en dos monedas elegía
+    -- una al azar y le ponía ese símbolo a una suma de las dos. Un deudor con
+    -- 500 dólares y 500 mil guaraníes aparecía debiendo "Gs. 500.500".
+    SELECT i2.currency
+      FROM invoices i2
+     WHERE i2.client_id = c.id
+       AND i2.status IN ('PENDING', 'PARTIAL')
+     GROUP BY i2.currency
+     ORDER BY SUM(i2.amount - i2.paid_amount) DESC, i2.currency
+     LIMIT 1
+  ) dom ON true
+  LEFT JOIN LATERAL (
     SELECT MAX(i.days_overdue) FILTER (WHERE i.status IN ('PENDING', 'PARTIAL')) AS dias,
-           -- Lo que se gestiona hoy: vencido mas lo que vence dentro del mes.
+           -- Las cifras de plata van SOLO en la moneda principal. Sumar monedas
+           -- distintas da un número que no significa nada, y en una lista de
+           -- cobranzas ese número es el que decide a quién se llama primero.
+           -- Cuando el deudor debe en más de una, la columna monedas lo dice y
+           -- la ficha muestra el detalle separado.
            COALESCE(SUM(i.amount - i.paid_amount) FILTER (
              WHERE i.status IN ('PENDING', 'PARTIAL')
+               AND i.currency = dom.currency
                AND i.due_date <= (date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date
            ), 0)::float8 AS del_mes,
+           COALESCE(SUM(i.amount - i.paid_amount) FILTER (
+             WHERE i.status IN ('PENDING', 'PARTIAL')
+               AND i.currency = dom.currency
+           ), 0)::float8 AS total,
            COUNT(DISTINCT i.currency) FILTER (WHERE i.status IN ('PENDING', 'PARTIAL'))::int AS monedas,
-           MIN(i.currency) FILTER (WHERE i.status IN ('PENDING', 'PARTIAL')) AS moneda,
            COUNT(*) FILTER (WHERE i.status IN ('PENDING', 'PARTIAL'))::int       AS abiertos,
            COUNT(*) FILTER (WHERE i.status = 'WRITTEN_OFF')::int                 AS castigados,
            string_agg(DISTINCT i.product, ', ')                                  AS productos
@@ -157,13 +179,15 @@ export async function getClients(
              c.document_number AS "documentNumber",
              c.external_id     AS "externalId",
              c.phone,
-             c.total_debt::float8 AS "totalDebt",
+             -- El total, como la deuda del mes, va en la moneda principal y no
+             -- en c.total_debt, que es la suma de todas las monedas del deudor.
+             COALESCE(mora.total, 0) AS "totalDebt",
              c.priority,
              c.status,
              COALESCE(mora.dias, 0) AS "daysOverdue",
              COALESCE(mora.del_mes, 0) AS "deudaDelMes",
              COALESCE(mora.monedas, 1) AS "monedas",
-             COALESCE(mora.moneda, c.currency) AS "moneda",
+             COALESCE(dom.currency, c.currency) AS "moneda",
              mora.abiertos,
              mora.castigados,
              mora.productos    AS "products",

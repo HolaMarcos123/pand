@@ -1,4 +1,9 @@
-import { parseAmount, parseDate, parseText } from "@/lib/import/parse-values";
+import {
+  parseAmount,
+  parseCurrency,
+  parseDate,
+  parseText,
+} from "@/lib/import/parse-values";
 import type { MappedRow, RowError } from "@/lib/import/row-schema";
 import type { FieldDef, FieldKey } from "@/lib/import/sector-config";
 
@@ -64,6 +69,24 @@ export function validateRows(
             built[field.key] = null;
           }
         } else {
+          errors.push({ row: rowNumber, field: field.label, message: result.reason });
+          failed = true;
+        }
+        continue;
+      }
+
+      if (field.type === "currency") {
+        const result = parseCurrency(value);
+        if (result.ok) {
+          built[field.key] = result.value;
+        } else if (result.empty) {
+          // Sin moneda en la fila, la pone el servidor con la de la
+          // organización. No se adivina acá.
+          built[field.key] = null;
+        } else {
+          // Una moneda que no se entiende NO cae a la de la organización: eso
+          // convertiría una deuda en dólares en una 7.000 veces más chica sin
+          // que nadie se entere. La fila se reporta y se descarta.
           errors.push({ row: rowNumber, field: field.label, message: result.reason });
           failed = true;
         }

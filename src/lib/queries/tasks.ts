@@ -72,10 +72,12 @@ export async function getTasks(
            c.name,
            c.document_number AS "documentNumber",
            c.phone,
-           c.total_debt::float8 AS "totalDebt",
+           -- En la moneda principal y no c.total_debt, que suma todas las
+           -- monedas del deudor y da un numero que no significa nada.
+           COALESCE(mora.total, 0) AS "totalDebt",
            COALESCE(mora.del_mes, 0) AS "deudaDelMes",
            COALESCE(mora.monedas, 1) AS "monedas",
-           COALESCE(mora.moneda, c.currency) AS "moneda",
+           COALESCE(dom.currency, c.currency) AS "moneda",
            c.priority,
            c.status,
            COALESCE(mora.dias, 0) AS "daysOverdue",
@@ -87,15 +89,34 @@ export async function getTasks(
       -- LATERAL y no subconsulta en el SELECT: se evalúa una vez por cliente aunque
       -- se usen dos columnas de cada bloque.
       LEFT JOIN LATERAL (
+        -- La moneda que define la conversacion: la que concentra mas saldo.
+        -- Antes era un MIN(), que con un deudor que debe en dos monedas elegia
+        -- una al azar y le ponia ese simbolo a la suma de las dos.
+        SELECT i2.currency
+          FROM invoices i2
+         WHERE i2.client_id = c.id
+           AND i2.status IN ('PENDING', 'PARTIAL')
+         GROUP BY i2.currency
+         ORDER BY SUM(i2.amount - i2.paid_amount) DESC, i2.currency
+         LIMIT 1
+      ) dom ON true
+      LEFT JOIN LATERAL (
         SELECT MAX(i.days_overdue) AS dias,
                -- Lo que se gestiona hoy: lo vencido mas lo que vence antes de
                -- que termine el mes. El total de deuda abierta incluye cuotas
                -- de dentro de seis meses y no sirve para priorizar el dia.
+               --
+               -- Las cifras van solo en la moneda principal: en una bandeja de
+               -- cobranzas este numero es el que decide a quien se llama
+               -- primero, y una suma de guaranies con dolares no ordena nada.
                COALESCE(SUM(i.amount - i.paid_amount) FILTER (
-                 WHERE i.due_date <= (date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date
+                 WHERE i.currency = dom.currency
+                   AND i.due_date <= (date_trunc('month', CURRENT_DATE) + interval '1 month - 1 day')::date
                ), 0)::float8 AS del_mes,
-               COUNT(DISTINCT i.currency)::int AS monedas,
-               MIN(i.currency) AS moneda
+               COALESCE(SUM(i.amount - i.paid_amount) FILTER (
+                 WHERE i.currency = dom.currency
+               ), 0)::float8 AS total,
+               COUNT(DISTINCT i.currency)::int AS monedas
           FROM invoices i
          WHERE i.client_id = c.id
            AND i.status IN ('PENDING', 'PARTIAL')
