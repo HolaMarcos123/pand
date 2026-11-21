@@ -269,6 +269,15 @@ model Invoice {
   organizationId String        @map("organization_id") @db.Uuid
   clientId       String        @map("client_id") @db.Uuid
   invoiceNumber  String        @map("invoice_number")
+  /// La operacion o credito al que pertenece esta cuota.
+  ///
+  /// Un deudor puede tener varios creditos a la vez —un vehiculo en 60 cuotas en
+  /// dolares, una moto en 36 en guaranies— y cada uno numera sus cuotas desde 1.
+  /// Sin esto, la cuota 1/60 de un credito y la de otro son indistinguibles.
+  ///
+  /// Cadena vacia y no null: en un indice unico Postgres considera distintos a
+  /// dos NULL, y la proteccion contra duplicados se perderia.
+  loanNumber     String        @default("") @map("loan_number")
   /// La cartera de la que vino ESTE comprobante.
   ///
   /// Esta aca y no solo en el deudor porque un mismo deudor puede figurar en
@@ -295,10 +304,14 @@ model Invoice {
   portfolio    Portfolio?   @relation(fields: [portfolioId], references: [id], onDelete: SetNull)
   payments     Payment[]
 
-  // Unico por DEUDOR y no por organizacion: en un cuotero el numero del
-  // comprobante es "1/60" —cuota 1 de 60— y lo tienen todos los deudores. Ver
-  // la migracion 20261121100000 para que paso cuando era unico por organizacion.
-  @@unique([organizationId, clientId, invoiceNumber])
+  // Unico por deudor + OPERACION + numero de cuota.
+  //
+  // En un cuotero el numero del comprobante es "1/60" y lo tienen todos los
+  // deudores, asi que no puede ser unico por organizacion (ver la migracion
+  // 20261121100000 para lo que paso cuando lo era). Y un mismo deudor puede
+  // tener varios creditos que numeran sus cuotas desde 1, de ahi la operacion
+  // (migracion 20261121160000).
+  @@unique([organizationId, clientId, loanNumber, invoiceNumber], map: "invoices_org_client_loan_number_key")
   @@index([organizationId])
   @@index([clientId])
   @@index([dueDate])

@@ -35,16 +35,20 @@ function mismaDeuda(a: MappedRow, b: MappedRow): boolean {
  * El mismo deudor trae dos veces el mismo numero de comprobante, con deudas
  * distintas. No se puede elegir una sin perder la otra.
  */
-function errorDeComprobanteRepetido(numero: string, externalId: string): ImportResult {
+function errorDeComprobanteRepetido(row: MappedRow): ImportResult {
+  const donde = row.loanNumber
+    ? `en la operación ${row.loanNumber}`
+    : "sin número de operación";
+
   return {
     ok: false,
     error:
-      `El deudor ${externalId} trae dos veces el comprobante "${numero}" con montos o ` +
-      "vencimientos distintos, así que no se puede saber cuál es la deuda. Dos causas " +
-      "habituales: que la columna mapeada a “Nro. de comprobante” no sea la del " +
-      "identificador —si quedó apuntando a una de montos, por ejemplo—, o que el deudor " +
-      "tenga dos créditos cuyas cuotas se numeran igual, y entonces el número tiene que " +
-      "distinguirlos.",
+      `El deudor ${row.externalId} trae dos veces la cuota "${row.invoiceNumber}" ` +
+      `${donde}, con montos, vencimientos o monedas distintos, así que no se puede ` +
+      "saber cuál es la deuda. Dos causas habituales: que la columna mapeada a “Nro. de " +
+      "comprobante” no sea la del identificador de la cuota —si quedó apuntando a una " +
+      "de montos, por ejemplo—, o que el deudor tenga varios créditos y falte mapear la " +
+      "columna de “Nro. de operación”, que es la que los distingue.",
   };
 }
 
@@ -162,7 +166,11 @@ export async function importBatch(input: {
   // veces el mismo número de comprobante con montos o vencimientos distintos, no
   // hay forma de saber cuál es la deuda, y el lote se rechaza diciendo cuál es.
   // ───────────────────────────────────────────────────────────────────────────
-  const claveDeuda = (row: MappedRow) => `${row.externalId}\u0000${row.invoiceNumber}`;
+  // La identidad de una deuda: deudor + operación + cuota. La operación vacía
+  // es un valor más, igual que en la base, así que una cartera que no la trae se
+  // sigue comportando como antes.
+  const claveDeuda = (row: MappedRow) =>
+    `${row.externalId}\u0000${row.loanNumber ?? ""}\u0000${row.invoiceNumber}`;
 
   const porComprobante = new Map<string, MappedRow>();
   for (const row of rows) {
@@ -170,7 +178,7 @@ export async function importBatch(input: {
     const previa = porComprobante.get(clave);
 
     if (previa && !mismaDeuda(previa, row)) {
-      return errorDeComprobanteRepetido(row.invoiceNumber, row.externalId);
+      return errorDeComprobanteRepetido(row);
     }
 
     porComprobante.set(clave, row);
@@ -243,11 +251,13 @@ export async function importBatch(input: {
     // 2. Comprobantes.
     await tx.$executeRaw`
       INSERT INTO invoices (
-        id, organization_id, client_id, portfolio_id, invoice_number,
-        product, description, amount, currency, due_date, updated_at
+        id, organization_id, client_id, portfolio_id, loan_number,
+        invoice_number, product, description, amount, currency, due_date,
+        updated_at
       )
       SELECT gen_random_uuid(), ${organizationId}::uuid, t.client_id,
-             ${portfolioId}::uuid, t.invoice_number, t.product, t.description,
+             ${portfolioId}::uuid, COALESCE(t.loan_number, ''), t.invoice_number,
+             t.product, t.description,
              -- La moneda sale de la fila cuando la planilla la trae. Si no, la de
              -- la organización: es el caso de una cartera de una sola moneda, que
              -- es lo más común. Lo que no se hace es adivinarla cuando la columna
@@ -258,15 +268,16 @@ export async function importBatch(input: {
              ${ahora}::timestamptz
         FROM unnest(
                ${comprobantes.map(deudorDe)}::uuid[],
+               ${comprobantes.map((r) => r.loanNumber)}::text[],
                ${comprobantes.map((r) => r.invoiceNumber)}::text[],
                ${comprobantes.map((r) => r.product)}::text[],
                ${comprobantes.map((r) => r.description)}::text[],
                ${comprobantes.map((r) => r.amount.toFixed(2))}::numeric[],
                ${comprobantes.map((r) => r.dueDate)}::date[],
                ${comprobantes.map((r) => r.currency)}::text[]
-             ) AS t(client_id, invoice_number, product, description, amount,
-                    due_date, currency)
-      ON CONFLICT (organization_id, client_id, invoice_number) DO UPDATE
+             ) AS t(client_id, loan_number, invoice_number, product,
+                    description, amount, due_date, currency)
+      ON CONFLICT (organization_id, client_id, loan_number, invoice_number) DO UPDATE
          SET portfolio_id = EXCLUDED.portfolio_id,
              product = EXCLUDED.product,
              description = EXCLUDED.description,

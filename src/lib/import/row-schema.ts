@@ -39,6 +39,9 @@ export const mappedRowSchema = z.object({
   email: optionalText(160),
   phone: optionalText(40),
   phoneAlt: optionalText(40),
+  // Vacio cuando la planilla no la trae: la cartera tiene una sola operacion
+  // por deudor y la cuota alcanza para identificar la deuda.
+  loanNumber: optionalText(120),
   invoiceNumber: z.string().trim().min(1).max(120),
   // Corto a propósito: es una categoría para agrupar, no una descripción.
   product: optionalText(120),

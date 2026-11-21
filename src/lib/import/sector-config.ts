@@ -9,6 +9,7 @@ export type FieldKey =
   | "email"
   | "phone"
   | "phoneAlt"
+  | "loanNumber"
   | "invoiceNumber"
   | "product"
   | "amount"
@@ -50,6 +51,13 @@ const BASE: FieldDef[] = [
   { key: "email", label: "Email", type: "text", required: false },
   { key: "phone", label: "Teléfono", type: "text", required: false },
   { key: "phoneAlt", label: "Teléfono alternativo", type: "text", required: false },
+  {
+    key: "loanNumber",
+    label: "Nro. de operación",
+    type: "text",
+    required: false,
+    hint: "El crédito al que pertenece la cuota. Mapealo si un mismo deudor puede tener más de una operación: sin esto, la cuota 1/60 de un crédito y la de otro no se distinguen.",
+  },
   { key: "invoiceNumber", label: "Nro. de comprobante", type: "text", required: true },
   {
     key: "product",
@@ -89,7 +97,8 @@ const OVERRIDES: Record<Sector, Partial<Record<FieldKey, string>>> = {
   FINANCIAL: {
     externalId: "Nro. de cliente",
     documentNumber: "CI / RUC",
-    invoiceNumber: "Nro. de préstamo o cuota",
+    loanNumber: "Nro. de operación o préstamo",
+    invoiceNumber: "Nro. de cuota",
     product: "Línea de crédito",
     amount: "Monto de la cuota",
   },
@@ -145,7 +154,8 @@ const ALIASES: Record<FieldKey, string[]> = {
   email: ["email", "correo", "mail", "correoelectronico"],
   phone: ["telefono", "tel", "celular", "movil", "phone", "contacto"],
   phoneAlt: ["telefono2", "telalternativo", "telefonoalternativo", "celular2", "otrotelefono"],
-  invoiceNumber: ["factura", "nrofactura", "numerofactura", "comprobante", "nrocomprobante", "boleta", "prestamo", "cuota", "nroprestamo", "invoice"],
+  loanNumber: ["operacion", "nrooperacion", "prestamo", "nroprestamo", "credito", "nrocredito", "contrato", "nrocontrato", "solicitud", "nrosolicitud"],
+  invoiceNumber: ["nrocuo", "cuota", "nrocuota", "numerocuota", "factura", "nrofactura", "numerofactura", "comprobante", "nrocomprobante", "boleta", "invoice"],
   product: ["producto", "articulo", "item", "bien", "linea", "lineacredito", "plan", "servicio", "tipoproducto", "product"],
   amount: ["monto", "importe", "saldo", "deuda", "total", "montocuota", "amount", "valor"],
   dueDate: ["vencimiento", "fechavencimiento", "fechavto", "vto", "duedate", "fecha"],

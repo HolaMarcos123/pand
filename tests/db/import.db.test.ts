@@ -81,6 +81,7 @@ function fila(over: Partial<MappedRow> & Pick<MappedRow, "externalId" | "invoice
     email: null,
     phone: null,
     phoneAlt: null,
+    loanNumber: null,
     product: null,
     amount: 1_000_000,
     dueDate: "2026-08-15",
@@ -202,6 +203,102 @@ describe("escritura del lote", () => {
       // Y con SU monto, no el del otro.
       expect(deudor?.invoices.every((i) => Number(i.amount) === monto)).toBe(true);
     }
+  });
+
+  it("un deudor con tres operaciones en dos monedas", async () => {
+    // El caso real de DIESA: un cliente con un vehículo en 60 cuotas financiado
+    // en dólares, una moto en 36 cuotas en guaraníes y un segundo vehículo en 48
+    // cuotas en dólares. Las tres numeran sus cuotas desde 1, así que sin la
+    // operación en la llave la cuota 1 de las tres es la misma deuda.
+    const res = await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [
+        // Vehículo, USD.
+        fila({ externalId: "X", loanNumber: "OP-100", invoiceNumber: "1/60", amount: 450, currency: "USD", product: "Vehículo" }),
+        fila({ externalId: "X", loanNumber: "OP-100", invoiceNumber: "2/60", amount: 450, currency: "USD", product: "Vehículo" }),
+        // Moto, guaraníes.
+        fila({ externalId: "X", loanNumber: "OP-200", invoiceNumber: "1/36", amount: 1_850_000, currency: "PYG", product: "Motocicleta" }),
+        fila({ externalId: "X", loanNumber: "OP-200", invoiceNumber: "2/36", amount: 1_850_000, currency: "PYG", product: "Motocicleta" }),
+        // Segundo vehículo, USD. Su cuota 1 choca en número con la del primero.
+        fila({ externalId: "X", loanNumber: "OP-300", invoiceNumber: "1/48", amount: 620, currency: "USD", product: "Vehículo" }),
+        // Y el caso que antes era imposible: dos operaciones con el MISMO número
+        // de cuota.
+        fila({ externalId: "X", loanNumber: "OP-100", invoiceNumber: "3/60", amount: 450, currency: "USD", product: "Vehículo" }),
+        fila({ externalId: "X", loanNumber: "OP-300", invoiceNumber: "3/60", amount: 620, currency: "USD", product: "Vehículo" }),
+      ],
+    });
+
+    expect(res).toEqual({ ok: true, clients: 1, invoices: 7 });
+
+    const deudor = await prisma.client.findFirstOrThrow({
+      where: { organizationId: ctx.organizationId, externalId: "X" },
+      select: {
+        invoices: {
+          select: {
+            loanNumber: true,
+            invoiceNumber: true,
+            amount: true,
+            currency: true,
+          },
+          orderBy: [{ loanNumber: "asc" }, { invoiceNumber: "asc" }],
+        },
+      },
+    });
+
+    // Las siete cuotas están, cada una en su operación.
+    expect(deudor.invoices).toHaveLength(7);
+
+    const porOperacion = new Map<string, number>();
+    for (const i of deudor.invoices) {
+      porOperacion.set(i.loanNumber, (porOperacion.get(i.loanNumber) ?? 0) + 1);
+    }
+    expect([...porOperacion.entries()].sort()).toEqual([
+      ["OP-100", 3],
+      ["OP-200", 2],
+      ["OP-300", 2],
+    ]);
+
+    // Las dos cuotas "3/60" de operaciones distintas son dos deudas, con sus
+    // montos propios.
+    const treses = deudor.invoices.filter((i) => i.invoiceNumber === "3/60");
+    expect(treses).toHaveLength(2);
+    expect(treses.map((i) => Number(i.amount)).sort((a, b) => a - b)).toEqual([450, 620]);
+
+    // Y cada operación conserva su moneda.
+    const monedaDe = (op: string) =>
+      deudor.invoices.find((i) => i.loanNumber === op)?.currency;
+    expect(monedaDe("OP-100")).toBe("USD");
+    expect(monedaDe("OP-200")).toBe("PYG");
+    expect(monedaDe("OP-300")).toBe("USD");
+  });
+
+  it("reimportar no duplica las cuotas de ninguna operación", async () => {
+    const filas = [
+      fila({ externalId: "X", loanNumber: "OP-100", invoiceNumber: "1/60", amount: 450, currency: "USD" }),
+      fila({ externalId: "X", loanNumber: "OP-300", invoiceNumber: "1/60", amount: 620, currency: "USD" }),
+    ];
+
+    await importBatch({ portfolioId: ctx.portfolioId, rows: filas });
+    const res = await importBatch({ portfolioId: ctx.portfolioId, rows: filas });
+
+    expect(res).toEqual({ ok: true, clients: 0, invoices: 2 });
+    expect(
+      await prisma.invoice.count({ where: { organizationId: ctx.organizationId } }),
+    ).toBe(2);
+  });
+
+  it("dos deudores pueden compartir el número de operación", async () => {
+    // El número de operación es de la financiera, no del deudor: dos personas
+    // podrían tener códigos que coincidan, y eso no las hace la misma deuda.
+    const res = await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [
+        fila({ externalId: "C-1", loanNumber: "OP-1", invoiceNumber: "1/60", amount: 100 }),
+        fila({ externalId: "C-2", loanNumber: "OP-1", invoiceNumber: "1/60", amount: 200 }),
+      ],
+    });
+
+    expect(res).toEqual({ ok: true, clients: 2, invoices: 2 });
   });
 
   it("el mismo deudor con la misma cuota dos veces y montos distintos se rechaza", async () => {

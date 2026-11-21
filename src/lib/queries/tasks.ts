@@ -180,9 +180,13 @@ export type ClientDetail = {
   }[];
   /** Carteras distintas en las que este deudor tiene deuda abierta. */
   carteras: string[];
+  /** Operaciones distintas con deuda abierta: un deudor puede tener varios creditos. */
+  operaciones: string[];
   invoices: {
     id: string;
     invoiceNumber: string;
+    /** El credito al que pertenece la cuota. Vacio si la cartera no lo trae. */
+    loanNumber: string;
     portfolioName: string | null;
     product: string | null;
     description: string | null;
@@ -231,6 +235,7 @@ export async function getClientDetail(
         select: {
           id: true,
           invoiceNumber: true,
+          loanNumber: true,
           product: true,
           description: true,
           amount: true,
@@ -324,6 +329,11 @@ export async function getClientDetail(
     saldos,
     references: client.references,
     carteras,
+    // Igual que las carteras: solo las que tienen deuda abierta. Una operacion
+    // ya cobrada no entra en la conversacion con el deudor.
+    operaciones: [
+      ...new Set(open.map((i) => i.loanNumber).filter((n): n is string => Boolean(n))),
+    ].sort(),
     priority: client.priority,
     status: client.status,
     riskScore: client.riskScore,
@@ -331,6 +341,7 @@ export async function getClientDetail(
     invoices: client.invoices.map((invoice) => ({
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
+      loanNumber: invoice.loanNumber,
       portfolioName: invoice.portfolio?.name ?? null,
       product: invoice.product,
       currency: invoice.currency,

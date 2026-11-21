@@ -577,6 +577,16 @@ export function ClientSheet({
                         >
                           <div className="min-w-0">
                             <p className="mono text-sm font-medium">
+                              {/* La operación va delante del número de cuota y
+                                  solo cuando el deudor tiene más de un crédito:
+                                  con tres operaciones de 60 cuotas, "1/60" sin
+                                  decir de cuál no le sirve a nadie. */}
+                              {invoice.loanNumber && detail.operaciones.length > 1 && (
+                                <span className="text-pand-gris">
+                                  {invoice.loanNumber}
+                                  <span className="mx-1">·</span>
+                                </span>
+                              )}
                               {invoice.invoiceNumber}
                             </p>
                             {(invoice.product || invoice.portfolioName) && (
