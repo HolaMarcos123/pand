@@ -6,6 +6,7 @@ import { z } from "zod";
 import type { Sector } from "@/generated/prisma/enums";
 import { requireSession } from "@/lib/auth/session";
 import {
+  MAX_CAMPOS_PROPIOS,
   MONEDAS,
   ZONAS_HORARIAS,
   settingsGuardadosSchema,
@@ -170,6 +171,63 @@ export async function saveCobranza(
   revalidatePath("/tasks");
   revalidatePath("/clients");
   revalidatePath("/admin/settings/cobranza");
+
+  return { ok: true };
+}
+
+const camposPropiosSchema = z.object({
+  campos: z
+    .array(
+      z.object({
+        id: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
+        label: z.string().trim().min(1).max(60),
+        tipo: z.enum(["texto", "numero", "fecha"]),
+      }),
+    )
+    .max(MAX_CAMPOS_PROPIOS),
+});
+
+/**
+ * Las columnas propias de la organización, las que Pand no modela.
+ *
+ * Toda planilla real trae datos que el producto no conoce —la sucursal, el
+ * auxiliar de cobranza, el número de factura del sistema de origen— y
+ * descartarlos al importar es perder información que la financiera usa todos los
+ * días. Acá se declaran, y después aparecen en el mapeo como un campo más.
+ *
+ * Borrar un campo de esta lista NO borra lo ya importado: el valor sigue en el
+ * `metadata` del comprobante y vuelve a verse si el campo se crea de nuevo con
+ * el mismo id. Es a propósito: una lista de configuración no debería poder
+ * destruir datos de cartera sin avisar.
+ */
+export async function saveCamposPropios(
+  input: z.infer<typeof camposPropiosSchema>,
+): Promise<ConfigResult> {
+  const session = await requireAdmin();
+  if (!session) {
+    return { ok: false, error: "Solo un administrador puede cambiar la configuración." };
+  }
+
+  const parsed = camposPropiosSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Revisá los nombres: cada campo necesita una etiqueta." };
+  }
+
+  const vistos = new Set<string>();
+  for (const campo of parsed.data.campos) {
+    if (vistos.has(campo.id)) {
+      return {
+        ok: false,
+        error: `Hay dos campos que se llaman igual ("${campo.label}"). Cambiá uno.`,
+      };
+    }
+    vistos.add(campo.id);
+  }
+
+  await mergeSettings(session.organization.id, { camposPropios: parsed.data.campos });
+
+  revalidatePath("/admin/settings/campos");
+  revalidatePath("/portfolio/new");
 
   return { ok: true };
 }

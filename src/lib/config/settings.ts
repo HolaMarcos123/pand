@@ -108,10 +108,62 @@ export const ZONAS_HORARIAS = [
 
 export type ZonaHoraria = (typeof ZONAS_HORARIAS)[number];
 
+/**
+ * Un campo propio de la organizacion.
+ *
+ * Toda planilla real trae columnas que Pand no conoce —la sucursal, el auxiliar
+ * de cobranza, el numero de factura del sistema de origen— y descartarlas al
+ * importar es perder datos que la financiera usa todos los dias. En vez de
+ * adivinar que columnas podrian existir, cada organizacion declara las suyas.
+ *
+ * El `id` es estable y el `label` se puede cambiar: si alguien renombra
+ * "Sucursal" a "Agencia", lo ya importado sigue encontrandose.
+ */
+export const TIPOS_DE_CAMPO = [
+  { value: "texto", label: "Texto" },
+  { value: "numero", label: "Numero" },
+  { value: "fecha", label: "Fecha" },
+] as const;
+
+export type TipoDeCampo = (typeof TIPOS_DE_CAMPO)[number]["value"];
+
+export type CampoPropio = {
+  id: string;
+  label: string;
+  tipo: TipoDeCampo;
+};
+
+/** Tope por organizacion. No es una limitacion tecnica: es para que la pantalla
+ *  de mapeo siga siendo legible. */
+export const MAX_CAMPOS_PROPIOS = 20;
+
+const campoPropioSchema = z.object({
+  // Minusculas, numeros y guion bajo: se usa como clave dentro del JSON del
+  // comprobante, asi que tiene que ser estable y facil de consultar en SQL.
+  id: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
+  label: z.string().trim().min(1).max(60),
+  tipo: z.enum(TIPOS_DE_CAMPO.map((t) => t.value) as [TipoDeCampo, ...TipoDeCampo[]]),
+});
+
+/** Convierte una etiqueta escrita por una persona en un id estable. */
+export function idDeCampo(label: string): string {
+  const base = label
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 40);
+
+  // Tiene que empezar con letra: "3ra_visita" no sirve como clave.
+  return /^[a-z]/.test(base) ? base : `campo_${base}`.slice(0, 40);
+}
+
 export const settingsGuardadosSchema = z.object({
   currency: z.enum(MONEDAS.map((m) => m.value) as [string, ...string[]]).optional(),
   timezone: z.enum(ZONAS_HORARIAS).optional(),
   tipificaciones: tipificacionesGuardadasSchema.optional(),
+  camposPropios: z.array(campoPropioSchema).max(MAX_CAMPOS_PROPIOS).optional(),
   cobranza: z
     .object({
       // Tasa mensual en porcentaje. El tope existe para atajar el dedo gordo:
@@ -128,6 +180,8 @@ export type Settings = {
   currency: string;
   timezone: string;
   tipificaciones: Tipificaciones;
+  /** Columnas propias de la organizacion, para lo que Pand no modela. */
+  camposPropios: CampoPropio[];
   /** Parámetros de cobranza. Hoy solo el interés por mora. */
   cobranza: ConfigInteres;
 };
@@ -151,6 +205,11 @@ export function resolverSettings(raw: unknown): Settings {
     currency: guardado.currency ?? SETTINGS_POR_DEFECTO.currency,
     timezone: guardado.timezone ?? SETTINGS_POR_DEFECTO.timezone,
     tipificaciones: resolverTipificaciones(guardado.tipificaciones),
+    // Se descartan los ids repetidos: dos campos con el mismo id escribirian
+    // sobre la misma clave y uno pisaria al otro sin aviso.
+    camposPropios: (guardado.camposPropios ?? []).filter(
+      (campo, i, todos) => todos.findIndex((c) => c.id === campo.id) === i,
+    ),
     cobranza: {
       tasaMensual:
         guardado.cobranza?.tasaMensual ?? INTERES_POR_DEFECTO.tasaMensual,

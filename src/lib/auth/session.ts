@@ -2,7 +2,11 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 
 import type { ConfigInteres } from "@/lib/collections/intereses";
-import { resolverSettings, type Tipificaciones } from "@/lib/config/settings";
+import {
+  resolverSettings,
+  type CampoPropio,
+  type Tipificaciones,
+} from "@/lib/config/settings";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
 import type { Plan, Role, Sector } from "@/generated/prisma/enums";
@@ -41,6 +45,12 @@ export type SessionData = {
      * Lo que necesite el resto de la configuración, que la lea del servidor.
      */
     tipificaciones: Tipificaciones;
+    /**
+     * Las columnas propias de la organizacion. Van aca por la misma razon que
+     * las tipificaciones: las necesita el importador, que es una pantalla
+     * cliente. Son etiquetas, no secretos.
+     */
+    camposPropios: CampoPropio[];
     /** Tasa de interés por mora. Es un parámetro de presentación, no un secreto. */
     cobranza: ConfigInteres;
   };
@@ -92,6 +102,7 @@ export const getSession = cache(async (): Promise<SessionData | null> => {
       suspendedAt: dbUser.organization.suspendedAt,
       currency: settings.currency,
       tipificaciones: settings.tipificaciones,
+      camposPropios: settings.camposPropios,
       cobranza: settings.cobranza,
     },
   };

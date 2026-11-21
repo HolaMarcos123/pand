@@ -1,5 +1,6 @@
 import { matchHeaders } from "@/lib/import/normalize-header";
 import { clasificarColumna, type ClaseDeColumna } from "@/lib/import/parse-values";
+import type { CampoPropio } from "@/lib/config/settings";
 import type { Sector } from "@/generated/prisma/enums";
 
 /** Campos de Pand a los que se puede mapear una columna del archivo. */
@@ -23,8 +24,27 @@ export type FieldKey =
 
 export type FieldType = "text" | "number" | "date" | "currency";
 
+/**
+ * La clave de un campo mapeable. O uno de Pand, o uno propio de la
+ * organizacion con el prefijo `custom:`.
+ *
+ * Es `string` y no una union porque los propios se definen en tiempo de
+ * ejecucion; `esCampoPropio` e `idDelCampoPropio` son la forma de distinguirlos.
+ */
+export type MappableKey = string;
+
+export const PREFIJO_PROPIO = "custom:";
+
+export function esCampoPropio(key: MappableKey): boolean {
+  return key.startsWith(PREFIJO_PROPIO);
+}
+
+export function idDelCampoPropio(key: MappableKey): string {
+  return key.slice(PREFIJO_PROPIO.length);
+}
+
 export type FieldDef = {
-  key: FieldKey;
+  key: MappableKey;
   label: string;
   type: FieldType;
   required: boolean;
@@ -129,15 +149,36 @@ const OVERRIDES: Record<Sector, Partial<Record<FieldKey, string>>> = {
   },
 };
 
-export function fieldsFor(sector: Sector): FieldDef[] {
+/**
+ * Los campos a los que se puede mapear una columna: los de Pand con las
+ * etiquetas del sector, mas los propios de la organizacion.
+ *
+ * Los propios van al final y nunca son obligatorios: son datos que la
+ * financiera quiere conservar, no algo sin lo cual no se puede gestionar.
+ */
+export function fieldsFor(
+  sector: Sector,
+  camposPropios: CampoPropio[] = [],
+): FieldDef[] {
   const overrides = OVERRIDES[sector];
-  return BASE.map((field) => ({
-    ...field,
-    label: overrides[field.key] ?? field.label,
+
+  const propios: FieldDef[] = camposPropios.map((campo) => ({
+    key: `${PREFIJO_PROPIO}${campo.id}`,
+    label: campo.label,
+    type: campo.tipo === "numero" ? "number" : campo.tipo === "fecha" ? "date" : "text",
+    required: false,
   }));
+
+  return [
+    ...BASE.map((field) => ({
+      ...field,
+      label: overrides[field.key as FieldKey] ?? field.label,
+    })),
+    ...propios,
+  ];
 }
 
-export const REQUIRED_FIELDS: FieldKey[] = BASE.filter((f) => f.required).map(
+export const REQUIRED_FIELDS: MappableKey[] = BASE.filter((f) => f.required).map(
   (f) => f.key,
 );
 

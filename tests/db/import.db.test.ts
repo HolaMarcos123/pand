@@ -68,6 +68,7 @@ function sesionDe(ctx: Contexto, role: "ADMIN" | "OPERATOR" = "ADMIN"): SessionD
       suspendedAt: null,
       currency: settings.currency,
       tipificaciones: settings.tipificaciones,
+      camposPropios: settings.camposPropios,
       cobranza: settings.cobranza,
     },
   };
@@ -456,6 +457,123 @@ describe("moneda", () => {
     expect(row?.moneda).toBe("PYG");
     expect(row?.totalDebt).toBe(500_000);
     expect(row?.monedas).toBe(2);
+  });
+});
+
+describe("campos propios de la organización", () => {
+  const CAMPOS = [
+    { id: "sucursal", label: "Sucursal", tipo: "texto" as const },
+    { id: "aux_cobranza", label: "Auxiliar de cobranza", tipo: "texto" as const },
+  ];
+
+  beforeEach(async () => {
+    // Se declaran en la base porque la ficha los lee de ahí, y en la sesión
+    // porque de ahí los toma el importador.
+    await prisma.organization.update({
+      where: { id: ctx.organizationId },
+      data: { settings: { camposPropios: CAMPOS } },
+    });
+    sesion = {
+      ...sesion,
+      organization: { ...sesion.organization, camposPropios: CAMPOS },
+    };
+  });
+
+  it("guarda lo que Pand no modela y lo devuelve en la ficha", async () => {
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [
+        fila({
+          externalId: "C-1",
+          invoiceNumber: "1/60",
+          custom: { sucursal: "Encarnación", aux_cobranza: "Armando Barreto" },
+        }),
+      ],
+    });
+
+    const comprobante = await prisma.invoice.findFirstOrThrow({
+      where: { organizationId: ctx.organizationId, invoiceNumber: "1/60" },
+      select: { metadata: true, clientId: true },
+    });
+    expect(comprobante.metadata).toMatchObject({
+      sucursal: "Encarnación",
+      aux_cobranza: "Armando Barreto",
+    });
+
+    // Y llegan a la ficha con su etiqueta, en el orden configurado.
+    const detalle = await getClientDetail(ctx.organizationId, comprobante.clientId);
+    expect(detalle?.invoices[0]?.propios).toEqual([
+      { label: "Sucursal", valor: "Encarnación" },
+      { label: "Auxiliar de cobranza", valor: "Armando Barreto" },
+    ]);
+  });
+
+  it("reimportar sin un campo no borra lo que ya estaba", async () => {
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [
+        fila({
+          externalId: "C-1",
+          invoiceNumber: "1/60",
+          custom: { sucursal: "Encarnación", aux_cobranza: "Armando Barreto" },
+        }),
+      ],
+    });
+
+    // La segunda planilla no trae la sucursal.
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [
+        fila({
+          externalId: "C-1",
+          invoiceNumber: "1/60",
+          custom: { aux_cobranza: "López M." },
+        }),
+      ],
+    });
+
+    const comprobante = await prisma.invoice.findFirstOrThrow({
+      where: { organizationId: ctx.organizationId, invoiceNumber: "1/60" },
+      select: { metadata: true },
+    });
+    // El metadata se fusiona: cambia lo que vino y sobrevive lo que no.
+    expect(comprobante.metadata).toMatchObject({
+      sucursal: "Encarnación",
+      aux_cobranza: "López M.",
+    });
+  });
+
+  it("un campo borrado de Config deja de mostrarse pero no se pierde", async () => {
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [
+        fila({
+          externalId: "C-1",
+          invoiceNumber: "1/60",
+          custom: { sucursal: "Encarnación", aux_cobranza: "Armando Barreto" },
+        }),
+      ],
+    });
+
+    // Se quita "Sucursal" de la configuración.
+    await prisma.organization.update({
+      where: { id: ctx.organizationId },
+      data: { settings: { camposPropios: [CAMPOS[1]] } },
+    });
+
+    const comprobante = await prisma.invoice.findFirstOrThrow({
+      where: { organizationId: ctx.organizationId, invoiceNumber: "1/60" },
+      select: { metadata: true, clientId: true },
+    });
+
+    const detalle = await getClientDetail(ctx.organizationId, comprobante.clientId);
+    expect(detalle?.invoices[0]?.propios).toEqual([
+      { label: "Auxiliar de cobranza", valor: "Armando Barreto" },
+    ]);
+
+    // Pero el dato sigue guardado: borrar un campo de una lista de
+    // configuración no puede destruir datos de cartera.
+    expect(comprobante.metadata).toMatchObject({ sucursal: "Encarnación" });
   });
 });
 

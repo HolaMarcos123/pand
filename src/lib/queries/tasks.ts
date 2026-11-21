@@ -1,5 +1,9 @@
 import { Prisma } from "@/generated/prisma/client";
 import type { ClientPriority, ClientStatus, Role } from "@/generated/prisma/enums";
+import {
+  resolverSettings,
+  type CampoPropio,
+} from "@/lib/config/settings";
 import { prisma } from "@/lib/prisma";
 
 export type TaskRow = {
@@ -187,6 +191,12 @@ export type ClientDetail = {
     invoiceNumber: string;
     /** El credito al que pertenece la cuota. Vacio si la cartera no lo trae. */
     loanNumber: string;
+    /**
+     * Los campos propios de la organizacion que trajo la planilla, ya con su
+     * etiqueta. Solo los que siguen declarados en Config: si alguien borro el
+     * campo, el valor sigue guardado pero no se muestra.
+     */
+    propios: { label: string; valor: string }[];
     portfolioName: string | null;
     product: string | null;
     description: string | null;
@@ -210,10 +220,40 @@ export type ClientDetail = {
 };
 
 /** Ficha completa para el panel lateral. */
+/**
+ * Los campos propios guardados en el metadata de un comprobante, con su
+ * etiqueta actual y en el orden en que estan configurados.
+ *
+ * Se recorre la configuracion y no el metadata: asi el orden es el que eligio
+ * la organizacion, y un campo que se borro de Config deja de mostrarse aunque
+ * el valor siga guardado.
+ */
+function valoresPropios(
+  metadata: unknown,
+  campos: CampoPropio[],
+): { label: string; valor: string }[] {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return [];
+  const datos = metadata as Record<string, unknown>;
+
+  return campos
+    .map((campo) => ({ label: campo.label, valor: datos[campo.id] }))
+    .filter((x) => x.valor !== null && x.valor !== undefined && x.valor !== "")
+    .map((x) => ({ label: x.label, valor: String(x.valor) }));
+}
+
 export async function getClientDetail(
   organizationId: string,
   clientId: string,
 ): Promise<ClientDetail | null> {
+  // La configuracion se lee aca y no se recibe por parametro para que la ficha
+  // no dependa de que cada pantalla se acuerde de pasarla. Es una fila y esta
+  // consulta ya es la de un solo deudor.
+  const organizacion = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { settings: true },
+  });
+  const { camposPropios } = resolverSettings(organizacion?.settings);
+
   const client = await prisma.client.findFirst({
     // El filtro por organizationId no es opcional: Prisma corre con BYPASSRLS y un
     // id de otro tenant traeria su ficha entera.
@@ -236,6 +276,7 @@ export async function getClientDetail(
           id: true,
           invoiceNumber: true,
           loanNumber: true,
+          metadata: true,
           product: true,
           description: true,
           amount: true,
@@ -342,6 +383,7 @@ export async function getClientDetail(
       id: invoice.id,
       invoiceNumber: invoice.invoiceNumber,
       loanNumber: invoice.loanNumber,
+      propios: valoresPropios(invoice.metadata, camposPropios),
       portfolioName: invoice.portfolio?.name ?? null,
       product: invoice.product,
       currency: invoice.currency,

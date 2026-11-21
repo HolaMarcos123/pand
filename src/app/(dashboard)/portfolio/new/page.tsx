@@ -38,6 +38,7 @@ export default async function NewPortfolioPage() {
     <UploadWizard
       defaultSector={session.organization.sector}
       currency={session.organization.currency}
+      camposPropios={session.organization.camposPropios}
       savedMappings={savedMappings}
     />
   );

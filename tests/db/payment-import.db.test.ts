@@ -56,6 +56,7 @@ function sesionDe(ctx: Contexto, role: "ADMIN" | "OPERATOR" = "ADMIN"): SessionD
       suspendedAt: null,
       currency: settings.currency,
       tipificaciones: settings.tipificaciones,
+      camposPropios: settings.camposPropios,
       cobranza: settings.cobranza,
     },
   };

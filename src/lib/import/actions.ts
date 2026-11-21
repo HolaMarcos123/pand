@@ -253,7 +253,7 @@ export async function importBatch(input: {
       INSERT INTO invoices (
         id, organization_id, client_id, portfolio_id, loan_number,
         invoice_number, product, description, amount, currency, due_date,
-        updated_at
+        metadata, updated_at
       )
       SELECT gen_random_uuid(), ${organizationId}::uuid, t.client_id,
              ${portfolioId}::uuid, COALESCE(t.loan_number, ''), t.invoice_number,
@@ -265,7 +265,9 @@ export async function importBatch(input: {
              -- parse-values, porque una deuda en dólares guardada como guaraníes
              -- queda 7.000 veces más chica y nadie se entera.
              t.amount, COALESCE(t.currency, ${currency}), t.due_date,
-             ${ahora}::timestamptz
+             -- Los campos propios de la organizacion. Van en metadata porque se
+             -- definen en Config y no hay una columna por cada uno.
+             COALESCE(t.metadata, '{}')::jsonb, ${ahora}::timestamptz
         FROM unnest(
                ${comprobantes.map(deudorDe)}::uuid[],
                ${comprobantes.map((r) => r.loanNumber)}::text[],
@@ -274,9 +276,14 @@ export async function importBatch(input: {
                ${comprobantes.map((r) => r.description)}::text[],
                ${comprobantes.map((r) => r.amount.toFixed(2))}::numeric[],
                ${comprobantes.map((r) => r.dueDate)}::date[],
-               ${comprobantes.map((r) => r.currency)}::text[]
+               ${comprobantes.map((r) => r.currency)}::text[],
+               ${comprobantes.map((r) =>
+                 r.custom && Object.keys(r.custom).length > 0
+                   ? JSON.stringify(r.custom)
+                   : null,
+               )}::text[]
              ) AS t(client_id, loan_number, invoice_number, product,
-                    description, amount, due_date, currency)
+                    description, amount, due_date, currency, metadata)
       ON CONFLICT (organization_id, client_id, loan_number, invoice_number) DO UPDATE
          SET portfolio_id = EXCLUDED.portfolio_id,
              product = EXCLUDED.product,
@@ -284,6 +291,9 @@ export async function importBatch(input: {
              amount = EXCLUDED.amount,
              currency = EXCLUDED.currency,
              due_date = EXCLUDED.due_date,
+             -- Se fusiona y no se pisa: lo que una carga anterior dejo en
+             -- metadata y esta planilla no trae sigue estando.
+             metadata = invoices.metadata || EXCLUDED.metadata,
              updated_at = EXCLUDED.updated_at
     `;
 

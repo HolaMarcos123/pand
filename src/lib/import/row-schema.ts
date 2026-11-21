@@ -60,6 +60,20 @@ export const mappedRowSchema = z.object({
   referenceName: optionalText(120),
   referencePhone: optionalText(40),
   referenceRelation: optionalText(60),
+  /**
+   * Los campos propios de la organizacion, por id.
+   *
+   * Van en un objeto y no como columnas porque se definen en tiempo de
+   * ejecucion: terminan en el `metadata` del comprobante. Se acota el tamano
+   * para que una planilla rara no meta medio megabyte por fila.
+   */
+  custom: z
+    .record(
+      z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
+      z.union([z.string().max(500), z.number().finite(), z.null()]),
+    )
+    .refine((o) => Object.keys(o).length <= 20, "demasiados campos propios")
+    .optional(),
 });
 
 export const importBatchSchema = z.object({

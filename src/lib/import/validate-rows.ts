@@ -5,7 +5,12 @@ import {
   parseText,
 } from "@/lib/import/parse-values";
 import type { MappedRow, RowError } from "@/lib/import/row-schema";
-import type { FieldDef, FieldKey } from "@/lib/import/sector-config";
+import {
+  esCampoPropio,
+  idDelCampoPropio,
+  type FieldDef,
+  type MappableKey,
+} from "@/lib/import/sector-config";
 
 export type ValidationOutcome = {
   valid: MappedRow[];
@@ -22,7 +27,7 @@ export type ValidationOutcome = {
  */
 export function validateRows(
   rows: Record<string, unknown>[],
-  mapping: Partial<Record<FieldKey, string>>,
+  mapping: Partial<Record<MappableKey, string>>,
   fields: FieldDef[],
 ): ValidationOutcome {
   const valid: MappedRow[] = [];
@@ -33,22 +38,34 @@ export function validateRows(
     // número coincide con lo que el usuario ve en Excel.
     const rowNumber = index + 2;
     const built: Record<string, unknown> = {};
+    // Los campos propios de la organizacion no son columnas de la tabla: van
+    // juntos en un objeto que termina en el `metadata` del comprobante.
+    const propios: Record<string, string | number | null> = {};
     let failed = false;
 
     for (const field of fields) {
       const column = mapping[field.key];
       const value = column ? raw[column] : undefined;
 
+      /** Donde se guarda el valor ya convertido de este campo. */
+      const guardar = (v: unknown) => {
+        if (esCampoPropio(field.key)) {
+          propios[idDelCampoPropio(field.key)] = v as string | number | null;
+        } else {
+          built[field.key] = v;
+        }
+      };
+
       if (field.type === "number") {
         const result = parseAmount(value);
         if (result.ok) {
-          built[field.key] = result.value;
+          guardar(result.value);
         } else if (result.empty) {
           if (field.required) {
             errors.push({ row: rowNumber, field: field.label, message: "vacío" });
             failed = true;
           } else {
-            built[field.key] = null;
+            guardar(null);
           }
         } else {
           errors.push({ row: rowNumber, field: field.label, message: result.reason });
@@ -60,13 +77,13 @@ export function validateRows(
       if (field.type === "date") {
         const result = parseDate(value);
         if (result.ok) {
-          built[field.key] = result.value.toISOString().slice(0, 10);
+          guardar(result.value.toISOString().slice(0, 10));
         } else if (result.empty) {
           if (field.required) {
             errors.push({ row: rowNumber, field: field.label, message: "vacío" });
             failed = true;
           } else {
-            built[field.key] = null;
+            guardar(null);
           }
         } else {
           errors.push({ row: rowNumber, field: field.label, message: result.reason });
@@ -78,11 +95,11 @@ export function validateRows(
       if (field.type === "currency") {
         const result = parseCurrency(value);
         if (result.ok) {
-          built[field.key] = result.value;
+          guardar(result.value);
         } else if (result.empty) {
           // Sin moneda en la fila, la pone el servidor con la de la
           // organización. No se adivina acá.
-          built[field.key] = null;
+          guardar(null);
         } else {
           // Una moneda que no se entiende NO cae a la de la organización: eso
           // convertiría una deuda en dólares en una 7.000 veces más chica sin
@@ -95,14 +112,16 @@ export function validateRows(
 
       const result = parseText(value);
       if (result.ok) {
-        built[field.key] = result.value;
+        guardar(result.value);
       } else if (field.required) {
         errors.push({ row: rowNumber, field: field.label, message: "vacío" });
         failed = true;
       } else {
-        built[field.key] = null;
+        guardar(null);
       }
     }
+
+    if (Object.keys(propios).length > 0) built.custom = propios;
 
     if (!failed) valid.push(built as MappedRow);
   });

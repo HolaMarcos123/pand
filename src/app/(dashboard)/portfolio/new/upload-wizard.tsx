@@ -27,13 +27,20 @@ import {
 } from "@/lib/import/actions";
 import { readSpreadsheet, type SheetData } from "@/lib/import/read-file";
 import { BATCH_SIZE } from "@/lib/import/row-schema";
-import { fieldsFor, suggestMapping, type FieldKey } from "@/lib/import/sector-config";
+import {
+  fieldsFor,
+  suggestMapping,
+  type MappableKey,
+} from "@/lib/import/sector-config";
 import { errorsToCsv, validateRows } from "@/lib/import/validate-rows";
+import type { CampoPropio } from "@/lib/config/settings";
 import type { Sector } from "@/generated/prisma/enums";
 
 const STEPS = ["Archivo", "Mapeo", "Confirmar"] as const;
 
-type Mapping = Partial<Record<FieldKey, string>>;
+// La clave es un campo de Pand o uno propio de la organizacion
+// ("custom:<id>"), de ahi que sea string y no la union de campos fijos.
+type Mapping = Partial<Record<MappableKey, string>>;
 
 /**
  * El primer valor no vacio de una columna, para mostrar que trae.
@@ -57,10 +64,13 @@ function muestraDe(rows: Record<string, unknown>[], header: string): string {
 export function UploadWizard({
   defaultSector,
   currency,
+  camposPropios,
   savedMappings,
 }: {
   defaultSector: Sector;
   currency: string;
+  /** Las columnas propias de la organizacion, definidas en Config. */
+  camposPropios: CampoPropio[];
   savedMappings: Record<string, Record<string, string>>;
 }) {
   const router = useRouter();
@@ -80,7 +90,10 @@ export function UploadWizard({
     null,
   );
 
-  const fields = useMemo(() => fieldsFor(sector), [sector]);
+  const fields = useMemo(
+    () => fieldsFor(sector, camposPropios),
+    [sector, camposPropios],
+  );
 
   // Se revalida en cada cambio de mapeo: el usuario ve el impacto al instante en vez
   // de descubrir 4.000 errores recién al final.
@@ -100,11 +113,11 @@ export function UploadWizard({
    * de ponerla en el nuevo; si no, una columna podria quedar asignada a dos
    * campos y el ultimo mapeo ganaria sin que se vea en pantalla.
    */
-  function asignarColumna(header: string, campo: FieldKey | null) {
+  function asignarColumna(header: string, campo: MappableKey | null) {
     setMapping((actual) => {
       const siguiente: Mapping = { ...actual };
 
-      for (const clave of Object.keys(siguiente) as FieldKey[]) {
+      for (const clave of Object.keys(siguiente)) {
         if (siguiente[clave] === header) delete siguiente[clave];
       }
 
@@ -362,7 +375,7 @@ export function UploadWizard({
                         <NativeSelect
                           value={asignado?.key ?? ""}
                           onChange={(event) =>
-                            asignarColumna(header, (event.target.value || null) as FieldKey | null)
+                            asignarColumna(header, event.target.value || null)
                           }
                         >
                           <option value="">— no importar —</option>

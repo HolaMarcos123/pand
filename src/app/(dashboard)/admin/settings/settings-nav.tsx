@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, ListChecks, Plug, Target, Users } from "lucide-react";
+import { Building2, Columns3, ListChecks, Plug, Target, Users } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -31,6 +31,12 @@ const SECCIONES = [
     label: "Usuarios",
     hint: "Equipo, roles e invitaciones",
     icon: Users,
+  },
+  {
+    href: "/admin/settings/campos",
+    label: "Campos propios",
+    hint: "Columnas de tu planilla que Pand no modela",
+    icon: Columns3,
   },
   {
     href: "/admin/settings/cobranza",

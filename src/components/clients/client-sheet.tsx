@@ -604,6 +604,21 @@ export function ClientSheet({
                                 )}
                               </p>
                             )}
+                            {/* Los campos propios de la organización: la
+                                sucursal, el auxiliar de cobranza, lo que la
+                                financiera haya declarado en Config. */}
+                            {invoice.propios.length > 0 && (
+                              <p className="truncate text-xs text-pand-gris">
+                                {invoice.propios.map((p) => (
+                                  <span key={p.label} className="mr-3">
+                                    {p.label}:{" "}
+                                    <span className="font-semibold text-pand-contorno">
+                                      {p.valor}
+                                    </span>
+                                  </span>
+                                ))}
+                              </p>
+                            )}
                             <p className="mono text-xs text-pand-gris">
                               vence {invoice.dueDate}
                               {overdue && (
