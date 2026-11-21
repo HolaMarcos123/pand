@@ -148,7 +148,9 @@ export const REQUIRED_FIELDS: FieldKey[] = BASE.filter((f) => f.required).map(
  * son la misma cosa, y todas aparecen en planillas reales.
  */
 const ALIASES: Record<FieldKey, string[]> = {
-  externalId: ["id", "idcliente", "codigo", "codigocliente", "nrocliente", "numerocliente", "cuenta", "nrocuenta", "externalid", "cliente"],
+  // Las abreviaturas van explicitas: las planillas reales escriben "COD CLIENTE"
+  // y "NRO CLI", no "Codigo de cliente".
+  externalId: ["id", "idcliente", "idcli", "codigo", "codigocliente", "cod", "codcliente", "codcli", "nrocliente", "nrocli", "numerocliente", "cuenta", "nrocuenta", "externalid", "cliente"],
   name: ["nombre", "razonsocial", "titular", "deudor", "nombredeudor", "cliente", "nombrecompleto"],
   documentNumber: ["documento", "ci", "ruc", "cedula", "dni", "cuit", "nrodocumento", "documentnumber"],
   email: ["email", "correo", "mail", "correoelectronico"],

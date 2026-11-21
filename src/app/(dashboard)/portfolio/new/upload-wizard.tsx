@@ -35,6 +35,25 @@ const STEPS = ["Archivo", "Mapeo", "Confirmar"] as const;
 
 type Mapping = Partial<Record<FieldKey, string>>;
 
+/**
+ * El primer valor no vacio de una columna, para mostrar que trae.
+ *
+ * Es el dato que convierte el mapeo en algo verificable de un vistazo: una
+ * columna llamada "NRO CUO" que muestra "1.016.488,00" esta mal mapeada, y se ve
+ * sin abrir el Excel. Se miran las primeras filas y no solo la primera porque la
+ * primera puede venir vacia.
+ */
+function muestraDe(rows: Record<string, unknown>[], header: string): string {
+  for (const row of rows.slice(0, 20)) {
+    const valor = row[header];
+    if (valor === null || valor === undefined) continue;
+    const texto = String(valor).trim();
+    if (!texto) continue;
+    return texto.length > 28 ? `${texto.slice(0, 28)}…` : texto;
+  }
+  return "—";
+}
+
 export function UploadWizard({
   defaultSector,
   currency,
@@ -71,6 +90,28 @@ export function UploadWizard({
   );
 
   const missingRequired = fields.filter((f) => f.required && !mapping[f.key]);
+
+  /**
+   * Asigna una columna del archivo a un campo de Pand.
+   *
+   * El estado se guarda como campo -> columna porque es lo que consume la
+   * validacion, pero la pantalla pregunta al reves: por cada columna, que es.
+   * De ahi que haya que sacar la columna de cualquier campo que la tuviera antes
+   * de ponerla en el nuevo; si no, una columna podria quedar asignada a dos
+   * campos y el ultimo mapeo ganaria sin que se vea en pantalla.
+   */
+  function asignarColumna(header: string, campo: FieldKey | null) {
+    setMapping((actual) => {
+      const siguiente: Mapping = { ...actual };
+
+      for (const clave of Object.keys(siguiente) as FieldKey[]) {
+        if (siguiente[clave] === header) delete siguiente[clave];
+      }
+
+      if (campo) siguiente[campo] = header;
+      return siguiente;
+    });
+  }
 
   async function handleFile(file: File) {
     setReading(true);
@@ -278,10 +319,10 @@ export function UploadWizard({
       {step === 1 && sheet && (
         <section className="space-y-5 rounded-card bg-white p-6 shadow-card">
           <div>
-            <h2 className="text-xl font-bold">Emparejá las columnas</h2>
+            <h2 className="text-xl font-bold">Elegí qué subir</h2>
             <p className="mt-1 text-sm text-pand-gris">
-              Ya adivinamos lo que pudimos. Revisá que cada campo apunte a la columna
-              correcta.
+              Están todas las columnas de tu archivo. Ya adivinamos lo que pudimos;
+              decidí qué es cada una y dejá en «no importar» lo que no haga falta.
             </p>
           </div>
 
@@ -289,47 +330,72 @@ export function UploadWizard({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Campo de Pand</TableHead>
                   <TableHead>Columna en tu archivo</TableHead>
+                  {/* El ejemplo es lo que hace evidente un mapeo equivocado: una
+                      columna de montos apuntando a «Nro. de cuota» se ve de
+                      inmediato, y ese error ya costó una cartera entera. */}
+                  <TableHead>Ejemplo</TableHead>
+                  <TableHead>Qué es en Pand</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {fields.map((field) => (
-                  <TableRow key={field.key}>
-                    <TableCell>
-                      <span className="font-semibold">{field.label}</span>
-                      {field.required && (
-                        <span className="ml-1 text-pand-coral" aria-label="obligatorio">
-                          *
+                {sheet.headers.map((header) => {
+                  const asignado = fields.find((f) => mapping[f.key] === header);
+
+                  return (
+                    <TableRow key={header}>
+                      <TableCell>
+                        <span className="font-semibold">{header}</span>
+                        {asignado?.hint && (
+                          <p className="mt-0.5 max-w-sm text-xs text-pand-gris">
+                            {asignado.hint}
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span className="mono text-xs text-pand-gris">
+                          {muestraDe(sheet.rows, header)}
                         </span>
-                      )}
-                      {field.hint && (
-                        <p className="mt-0.5 text-xs text-pand-gris">{field.hint}</p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <NativeSelect
-                        value={mapping[field.key] ?? ""}
-                        onChange={(event) =>
-                          setMapping((current) => ({
-                            ...current,
-                            [field.key]: event.target.value || undefined,
-                          }))
-                        }
-                      >
-                        <option value="">— sin asignar —</option>
-                        {sheet.headers.map((header) => (
-                          <option key={header} value={header}>
-                            {header}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      </TableCell>
+                      <TableCell>
+                        <NativeSelect
+                          value={asignado?.key ?? ""}
+                          onChange={(event) =>
+                            asignarColumna(header, (event.target.value || null) as FieldKey | null)
+                          }
+                        >
+                          <option value="">— no importar —</option>
+                          {fields.map((field) => {
+                            // Un campo ya tomado por otra columna se muestra con
+                            // la columna que lo tiene, para que se entienda por
+                            // qué elegirlo acá se lo saca de allá.
+                            const tomadoPor = mapping[field.key];
+                            const ocupado = tomadoPor && tomadoPor !== header;
+
+                            return (
+                              <option key={field.key} value={field.key}>
+                                {field.label}
+                                {field.required ? " *" : ""}
+                                {ocupado ? ` (hoy: ${tomadoPor})` : ""}
+                              </option>
+                            );
+                          })}
+                        </NativeSelect>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
+
+          <p className="text-sm text-pand-gris">
+            Se van a importar{" "}
+            <strong className="text-pand-tinta">
+              {sheet.headers.filter((h) => fields.some((f) => mapping[f.key] === h)).length}
+            </strong>{" "}
+            de {sheet.headers.length} columnas.
+          </p>
 
           {missingRequired.length > 0 && (
             <p className="text-sm text-pand-coral">
