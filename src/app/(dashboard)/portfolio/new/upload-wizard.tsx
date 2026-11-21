@@ -122,7 +122,8 @@ export function UploadWizard({
       // Arranca del mapeo guardado para este sector si existe; si no, adivina por
       // el nombre de los encabezados.
       const saved = savedMappings[sector];
-      const suggested = suggestMapping(data.headers);
+      // Con las filas: el adivinador mira el dato y no solo el encabezado.
+      const suggested = suggestMapping(data.headers, data.rows);
       const base: Mapping = saved
         ? // Solo se conservan las columnas que este archivo realmente trae.
           Object.fromEntries(

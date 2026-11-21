@@ -137,3 +137,103 @@ describe("catálogo de medios de pago", () => {
     expect(mapa.method).toBe("Forma de Pago");
   });
 });
+
+describe("suggestMapping — el dato manda sobre el encabezado", () => {
+  /**
+   * Los encabezados de un cuotero real. El caso que importa: conviven una
+   * columna "NR_CUO" con "13/35" —el número de cuota— y otra "CUOTA" con
+   * "66,00" —la plata—, más una "MONTO_APLICADO" que está toda en cero.
+   *
+   * Adivinando solo por nombre, "CUOTA" se llevaba el número de cuota y
+   * "MONTO_APLICADO" el monto de la deuda: la cartera entera habría entrado con
+   * deuda cero y las cuotas colapsadas por monto repetido.
+   */
+  const CUOTERO = [
+    "SUCURSAL", "NR_FACTURA", "CONTRATO", "Aux_Cobranza", "NR_CUO", "CUOTA",
+    "MONTO_APLICADO", "NRO_CLI", "CLIENTE", "NRO_DOCUMENTO", "CORREO",
+    "TELEF1", "TELEF2", "FCH_VTO", "MONEDA", "OBSERVACION1", "NOMBRE_GARANTE",
+  ];
+
+  const FILAS = [
+    {
+      SUCURSAL: "Encarnación", NR_FACTURA: "15701-2-3000332", CONTRATO: "3000332",
+      Aux_Cobranza: "Armando Barreto", NR_CUO: "13/35", CUOTA: "66,00",
+      MONTO_APLICADO: "0,00", NRO_CLI: "30003", CLIENTE: "Ramona Benítez",
+      NRO_DOCUMENTO: "3456789", CORREO: "r@ej.com.py", TELEF1: "0981555444",
+      TELEF2: "0972111222", FCH_VTO: "15/08/2026", MONEDA: "USD",
+      OBSERVACION1: "Cuota 13", NOMBRE_GARANTE: "Hugo Martínez",
+    },
+    {
+      SUCURSAL: "Central", NR_FACTURA: "15701-2-3000333", CONTRATO: "3000333",
+      Aux_Cobranza: "López M.", NR_CUO: "1/60", CUOTA: "1.850.000",
+      MONTO_APLICADO: "0,00", NRO_CLI: "30004", CLIENTE: "Hugo Martínez",
+      NRO_DOCUMENTO: "4567890", CORREO: "h@ej.com.py", TELEF1: "0982333111",
+      TELEF2: "", FCH_VTO: "15/09/2026", MONEDA: "Gs.",
+      OBSERVACION1: "Cuota 1", NOMBRE_GARANTE: "Ana Rojas",
+    },
+  ];
+
+  it("la cuota sale de la columna con forma 13/35, no de la que se llama CUOTA", () => {
+    const m = suggestMapping(CUOTERO, FILAS);
+    expect(m.invoiceNumber).toBe("NR_CUO");
+    expect(m.amount).toBe("CUOTA");
+  });
+
+  it("no toma como monto una columna que está toda en cero", () => {
+    // MONTO_APLICADO coincide con el alias "monto" y aparece antes que CUOTA en
+    // el archivo. Si ganara, toda la cartera entraría con deuda cero.
+    const m = suggestMapping(CUOTERO, FILAS);
+    expect(m.amount).not.toBe("MONTO_APLICADO");
+  });
+
+  it("empareja el resto del cuotero", () => {
+    const m = suggestMapping(CUOTERO, FILAS);
+    expect(m).toMatchObject({
+      externalId: "NRO_CLI",
+      name: "CLIENTE",
+      documentNumber: "NRO_DOCUMENTO",
+      email: "CORREO",
+      phone: "TELEF1",
+      phoneAlt: "TELEF2",
+      loanNumber: "CONTRATO",
+      dueDate: "FCH_VTO",
+      currency: "MONEDA",
+      description: "OBSERVACION1",
+      referenceName: "NOMBRE_GARANTE",
+    });
+  });
+
+  it("deja sin asignar lo que Pand no sabe guardar", () => {
+    const m = suggestMapping(CUOTERO, FILAS);
+    const usadas = new Set(Object.values(m));
+    for (const columna of ["SUCURSAL", "Aux_Cobranza", "MONTO_APLICADO"]) {
+      expect(usadas.has(columna), `${columna} no deberia mapearse`).toBe(false);
+    }
+  });
+
+  it("un número de contrato pelado sigue sirviendo como identificador", () => {
+    // "3000332" se puede leer como número. Lo que se rechaza para un
+    // identificador es la forma de PLATA ("66,00", "1.850.000"), no cualquier
+    // número: si no, el contrato quedaría sin mapear.
+    const m = suggestMapping(CUOTERO, FILAS);
+    expect(m.loanNumber).toBe("CONTRATO");
+  });
+
+  it("sin filas de muestra se comporta como antes, solo por nombre", () => {
+    const m = suggestMapping(["NRO_CLI", "CLIENTE", "CUOTA", "FCH_VTO"]);
+    expect(m.externalId).toBe("NRO_CLI");
+    expect(m.name).toBe("CLIENTE");
+  });
+
+  it("con dos columnas de fecha no adivina el vencimiento a la fuerza", () => {
+    const headers = ["ID", "NOMBRE", "COMPROBANTE", "MONTO", "FCH_OTORGAMIENTO", "FCH_VTO"];
+    const filas = [
+      {
+        ID: "C-1", NOMBRE: "Ana", COMPROBANTE: "F-1", MONTO: "500.000",
+        FCH_OTORGAMIENTO: "01/01/2025", FCH_VTO: "15/08/2026",
+      },
+    ];
+    // La regla de "una sola fecha" no aplica, así que decide el alias.
+    expect(suggestMapping(headers, filas).dueDate).toBe("FCH_VTO");
+  });
+});

@@ -1,4 +1,5 @@
 import { matchHeaders } from "@/lib/import/normalize-header";
+import { clasificarColumna, type ClaseDeColumna } from "@/lib/import/parse-values";
 import type { Sector } from "@/generated/prisma/enums";
 
 /** Campos de Pand a los que se puede mapear una columna del archivo. */
@@ -154,22 +155,101 @@ const ALIASES: Record<FieldKey, string[]> = {
   name: ["nombre", "razonsocial", "titular", "deudor", "nombredeudor", "cliente", "nombrecompleto"],
   documentNumber: ["documento", "ci", "ruc", "cedula", "dni", "cuit", "nrodocumento", "documentnumber"],
   email: ["email", "correo", "mail", "correoelectronico"],
-  phone: ["telefono", "tel", "celular", "movil", "phone", "contacto"],
-  phoneAlt: ["telefono2", "telalternativo", "telefonoalternativo", "celular2", "otrotelefono"],
-  loanNumber: ["operacion", "nrooperacion", "prestamo", "nroprestamo", "credito", "nrocredito", "contrato", "nrocontrato", "solicitud", "nrosolicitud"],
-  invoiceNumber: ["nrocuo", "cuota", "nrocuota", "numerocuota", "factura", "nrofactura", "numerofactura", "comprobante", "nrocomprobante", "boleta", "invoice"],
+  phone: ["telef1", "tel1", "telefono1", "telefono", "tel", "celular", "movil", "phone", "contacto"],
+  phoneAlt: ["telef2", "tel2", "telefono2", "telalternativo", "telefonoalternativo", "celular2", "otrotelefono"],
+  loanNumber: ["operacion", "nrooperacion", "oper", "prestamo", "nroprestamo", "credito", "nrocredito", "contrato", "nrocontrato", "solicitud", "nrosolicitud"],
+  // "nrcuo" y "cuo" van explicitas: la planilla real escribe "NR_CUO", que al
+  // normalizar queda "nrcuo" y no matcheaba contra "nrocuo".
+  invoiceNumber: ["nrcuo", "nrocuo", "cuo", "nrcuota", "nrocuota", "numerocuota", "cuotanro", "cuota", "factura", "nrfactura", "nrofactura", "numerofactura", "comprobante", "nrocomprobante", "boleta", "invoice"],
   product: ["producto", "articulo", "item", "bien", "linea", "lineacredito", "plan", "servicio", "tipoproducto", "product"],
-  amount: ["monto", "importe", "saldo", "deuda", "total", "montocuota", "amount", "valor"],
-  dueDate: ["vencimiento", "fechavencimiento", "fechavto", "vto", "duedate", "fecha"],
-  currency: ["moneda", "divisa", "currency", "mon", "tipomoneda", "monedacredito"],
+  amount: ["montocuota", "importecuota", "valorcuota", "cuota", "monto", "importe", "saldo", "deuda", "total", "amount", "valor"],
+  dueDate: ["fchvto", "fchvencimiento", "fvto", "vencimiento", "fechavencimiento", "fechavto", "vto", "duedate", "fecha"],
+  // Sin "mon": por startsWith se llevaba "MONTO_APLICADO".
+  currency: ["moneda", "divisa", "currency", "tipomoneda", "monedacredito", "tipocambio"],
   description: ["descripcion", "detalle", "concepto", "observacion", "description"],
   referenceName: ["referencia", "nombrereferencia", "referencianombre", "contactoreferencia", "garante", "nombregarante"],
   referencePhone: ["telefonoreferencia", "referenciatelefono", "telreferencia", "telefonogarante", "celularreferencia"],
   referenceRelation: ["vinculo", "parentesco", "relacion", "vinculoreferencia"],
 };
 
+/**
+ * Campos cuyo valor es un identificador o un nombre. Una columna con forma de
+ * plata nunca es uno de estos, por mas que el encabezado se parezca.
+ */
+const IDENTIFICADORES = new Set<FieldKey>([
+  "externalId",
+  "name",
+  "documentNumber",
+  "loanNumber",
+  "invoiceNumber",
+]);
+
+/**
+ * Adivina el mapeo mirando los encabezados Y los datos.
+ *
+ * Por que los datos: en el cuotero de una financiera conviven "NR_CUO" con
+ * "13/35" —la cuota— y "CUOTA" con "66,00" —la plata—. Adivinando solo por
+ * nombre, "CUOTA" se lleva el campo del numero de cuota, y como ademas existe
+ * una columna "MONTO_APLICADO" en cero, el monto de la deuda se toma de ahi: la
+ * cartera entera entraria con deuda cero. Las dos cosas se evitan preguntandole
+ * a la columna que trae.
+ *
+ * Sin filas de muestra se comporta como antes, solo por nombre.
+ */
 export function suggestMapping(
   headers: string[],
+  rows: Record<string, unknown>[] = [],
 ): Partial<Record<FieldKey, string>> {
-  return matchHeaders(headers, ALIASES);
+  if (rows.length === 0) return matchHeaders(headers, ALIASES);
+
+  const muestra = rows.slice(0, 30);
+  const clase = new Map<FieldKey | string, ClaseDeColumna>();
+  for (const header of headers) {
+    clase.set(header, clasificarColumna(muestra.map((row) => row[header])));
+  }
+
+  const yaAsignado: Partial<Record<FieldKey, string>> = {};
+
+  // Una sola columna con forma "13/35" en toda la planilla es el numero de
+  // cuota, se llame como se llame. Es la senal mas fuerte que hay y por eso va
+  // antes que cualquier alias.
+  const fracciones = headers.filter((h) => clase.get(h) === "fraccion");
+  if (fracciones.length === 1) yaAsignado.invoiceNumber = fracciones[0];
+
+  // Lo mismo con las fechas: si en toda la planilla hay una sola columna con
+  // forma de fecha, es el vencimiento, se llame "FCH_VTO" o como sea. Con dos o
+  // mas —otorgamiento y vencimiento, por ejemplo— no se adivina y deciden los
+  // alias.
+  const fechas = headers.filter((h) => clase.get(h) === "fecha");
+  if (fechas.length === 1) yaAsignado.dueDate = fechas[0];
+
+  const compatible = (key: FieldKey, header: string, estricto: boolean) => {
+    const c = clase.get(header) ?? "texto";
+    const tipo = BASE.find((f) => f.key === key)?.type;
+
+    if (tipo === "number") {
+      if (c === "texto" || c === "fraccion" || c === "fecha") return false;
+      // En la primera pasada no se acepta una columna que esta toda en cero:
+      // casi siempre es un "aplicado" o "pagado" sin usar, y tomarla como el
+      // monto de la deuda deja la cartera en cero sin que nadie lo note.
+      return estricto ? c !== "montocero" : true;
+    }
+
+    if (tipo === "date") return c === "fecha";
+    if (IDENTIFICADORES.has(key)) return c !== "monto" && c !== "montocero";
+    return true;
+  };
+
+  const primera = matchHeaders(headers, ALIASES, {
+    yaAsignado,
+    compatible: (key, header) => compatible(key, header, true),
+  });
+
+  // Segunda pasada para lo que quedo sin resolver, aflojando el veto. Mejor un
+  // campo obligatorio con una columna dudosa —que la persona ve y corrige en la
+  // pantalla, con el ejemplo al lado— que dejarselo vacio.
+  return matchHeaders(headers, ALIASES, {
+    yaAsignado: primera,
+    compatible: (key, header) => compatible(key, header, false),
+  });
 }

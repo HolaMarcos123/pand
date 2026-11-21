@@ -197,3 +197,67 @@ export function parseCurrency(raw: unknown): ParseResult<string> {
     reason: `moneda no reconocida: "${texto}"`,
   };
 }
+
+/**
+ * De que tipo es una columna, mirando lo que trae y no como se llama.
+ *
+ * El nombre del encabezado solo no alcanza, y eso costo una cartera. En el
+ * cuotero de una financiera hay una columna "NR_CUO" con "13/35" —la cuota— y
+ * otra "CUOTA" con "66,00" —la plata—. Adivinando por nombre, "CUOTA" se lleva
+ * el campo del numero de cuota y toda la deuda termina mal. Mirando el dato,
+ * "13/35" no puede ser un monto y "66,00" no puede ser un identificador.
+ *
+ * - `fraccion`  "13/35": el numero de cuota de un cuotero. Es la senal mas
+ *               fuerte que hay, porque ninguna otra columna tiene esa forma.
+ * - `monto`     tiene forma de plata: decimales de 1 o 2 digitos, separadores
+ *               de miles, o un simbolo de moneda.
+ * - `montocero` tiene forma de plata pero esta todo en cero. Suele ser una
+ *               columna de "aplicado" o "pagado" que todavia no se uso, y
+ *               elegirla como monto de la deuda dejaria la cartera en cero.
+ * - `fecha`     se puede leer como fecha.
+ * - `numero`    un entero pelado, sin forma de plata. Un numero de contrato
+ *               entra aca, y por eso `numero` NO se descarta como identificador.
+ * - `texto`     cualquier otra cosa.
+ */
+export type ClaseDeColumna =
+  | "fraccion"
+  | "monto"
+  | "montocero"
+  | "fecha"
+  | "numero"
+  | "texto";
+
+const FRACCION = /^\s*\d{1,4}\s*\/\s*\d{1,4}\s*$/;
+/** Decimales de 1 o 2 digitos, separadores de miles, o simbolo de moneda. */
+const FORMA_DE_PLATA = /[.,]\d{1,2}\s*$|\d[.,]\d{3}\b|^\s*(gs|g\$|₲|us\$|u\$s|\$|r\$)/i;
+const ENTERO_PELADO = /^\s*-?\d+\s*$/;
+
+export function clasificarColumna(valores: unknown[]): ClaseDeColumna {
+  const textos = valores
+    .filter((v) => v !== null && v !== undefined)
+    .map((v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).trim()))
+    .filter(Boolean);
+
+  if (textos.length === 0) return "texto";
+
+  const todas = (prueba: (t: string) => boolean) => textos.every(prueba);
+
+  if (todas((t) => FRACCION.test(t))) return "fraccion";
+
+  // La fecha va antes que el numero: "20260815" es las dos cosas, y como
+  // vencimiento es mas util que como entero.
+  if (todas((t) => parseDate(t).ok)) return "fecha";
+
+  if (todas((t) => FORMA_DE_PLATA.test(t) && parseAmount(t).ok)) {
+    return todas((t) => {
+      const r = parseAmount(t);
+      return r.ok && r.value === 0;
+    })
+      ? "montocero"
+      : "monto";
+  }
+
+  if (todas((t) => ENTERO_PELADO.test(t))) return "numero";
+
+  return "texto";
+}
