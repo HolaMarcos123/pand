@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 
 import { requireSession } from "@/lib/auth/session";
+// La definicion de "deuda repetida" vive aparte porque la comparte el wizard:
+// detecta el choque en el paso de mapeo, antes de crear la cartera. Si las dos
+// se separan, el navegador deja pasar algo que el servidor rechaza.
+import { claveDeDeuda, mismaDeuda } from "@/lib/import/duplicados";
 import { importBatchSchema, type MappedRow } from "@/lib/import/row-schema";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma/client";
@@ -11,25 +15,6 @@ import type { Sector } from "@/generated/prisma/enums";
 export type ImportResult =
   | { ok: true; clients: number; invoices: number }
   | { ok: false; error: string };
-
-/**
- * Dos filas describen la misma deuda, y no dos deudas distintas que comparten
- * número de comprobante.
- *
- * Se comparan los campos que identifican la deuda y no los de contacto: una
- * planilla puede traer la fila del deudor repetida con el teléfono corregido, y
- * eso no la convierte en otra deuda.
- */
-function mismaDeuda(a: MappedRow, b: MappedRow): boolean {
-  return (
-    a.externalId === b.externalId &&
-    a.amount === b.amount &&
-    a.dueDate === b.dueDate &&
-    // La moneda entra en la comparación: 500 dólares y 500 guaraníes son la
-    // misma cifra y deudas que no se parecen en nada.
-    a.currency === b.currency
-  );
-}
 
 /**
  * El mismo deudor trae dos veces el mismo numero de comprobante, con deudas
@@ -169,12 +154,9 @@ export async function importBatch(input: {
   // La identidad de una deuda: deudor + operación + cuota. La operación vacía
   // es un valor más, igual que en la base, así que una cartera que no la trae se
   // sigue comportando como antes.
-  const claveDeuda = (row: MappedRow) =>
-    `${row.externalId}\u0000${row.loanNumber ?? ""}\u0000${row.invoiceNumber}`;
-
   const porComprobante = new Map<string, MappedRow>();
   for (const row of rows) {
-    const clave = claveDeuda(row);
+    const clave = claveDeDeuda(row);
     const previa = porComprobante.get(clave);
 
     if (previa && !mismaDeuda(previa, row)) {

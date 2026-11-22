@@ -11,6 +11,7 @@ import {
   Loader2,
   RotateCcw,
   Upload,
+  Wand2,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -46,6 +47,10 @@ import {
   saveColumnMapping,
 } from "@/lib/import/actions";
 import { etiquetaDesdeEncabezado, tipoDesdeMuestra } from "@/lib/import/campo-nuevo";
+import {
+  detectarCuotaRepetida,
+  sugerirColumnaDeCuota,
+} from "@/lib/import/duplicados";
 import { readSpreadsheet, type SheetData } from "@/lib/import/read-file";
 import { BATCH_SIZE } from "@/lib/import/row-schema";
 import {
@@ -157,6 +162,28 @@ export function UploadWizard({
   );
 
   const missingRequired = fields.filter((f) => f.required && !mapping[f.key]);
+
+  /**
+   * Dos filas que dicen ser la misma cuota del mismo crédito.
+   *
+   * Se detecta acá y no al escribir porque acá se puede arreglar: la persona
+   * está mirando el mapeo que lo causó. El servidor lo sigue rechazando, pero
+   * para entonces la cartera ya se creó y el mensaje tiene que adivinar.
+   */
+  const repetida = useMemo(
+    () => (validation ? detectarCuotaRepetida(validation.valid) : null),
+    [validation],
+  );
+
+  /** Qué columna serviría como "Nro. de cuota". Solo se busca si hay choque. */
+  const columnaSugerida = useMemo(() => {
+    if (!repetida || !sheet) return null;
+    return sugerirColumnaDeCuota(sheet.rows, sheet.headers, {
+      externalId: mapping.externalId,
+      loanNumber: mapping.loanNumber,
+      invoiceNumber: mapping.invoiceNumber,
+    });
+  }, [repetida, sheet, mapping]);
 
   /**
    * Asigna una columna del archivo a un campo de Pand.
@@ -611,6 +638,71 @@ export function UploadWizard({
             </p>
           )}
 
+          {repetida && (
+            <div className="rounded-xl border border-pand-coral/40 bg-pand-coral/5 p-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-pand-coral" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-pand-contorno">
+                    Hay {formatNumber(repetida.total)}{" "}
+                    {repetida.total === 1 ? "deuda repetida" : "deudas repetidas"}
+                  </p>
+                  <p className="mt-1 text-xs text-pand-gris">
+                    El deudor <span className="mono">{repetida.externalId}</span>{" "}
+                    trae dos veces la cuota{" "}
+                    <span className="mono">{repetida.invoiceNumber}</span>
+                    {repetida.loanNumber ? (
+                      <>
+                        {" "}
+                        en la operación{" "}
+                        <span className="mono">{repetida.loanNumber}</span>
+                      </>
+                    ) : (
+                      " sin número de operación"
+                    )}
+                    , con deudas distintas (filas{" "}
+                    <span className="mono">{repetida.filas[0]}</span> y{" "}
+                    <span className="mono">{repetida.filas[1]}</span>). Así no se
+                    puede saber cuál es la deuda.
+                  </p>
+
+                  {columnaSugerida ? (
+                    <>
+                      <p className="mt-2 text-xs text-pand-gris">
+                        La columna{" "}
+                        <strong className="font-semibold text-pand-contorno">
+                          {columnaSugerida}
+                        </strong>{" "}
+                        sí distingue cada cuota de este archivo. Suele pasar con
+                        los cuoteros: el número de comprobante es el del crédito
+                        y se repite en todas sus cuotas.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          asignarColumna(columnaSugerida, "invoiceNumber");
+                          toast.success(
+                            `«Nro. de cuota» ahora toma ${columnaSugerida}.`,
+                          );
+                        }}
+                        className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-pand-azul hover:underline"
+                      >
+                        <Wand2 className="h-3 w-3" />
+                        Usar {columnaSugerida} como Nro. de cuota
+                      </button>
+                    </>
+                  ) : (
+                    <p className="mt-2 text-xs text-pand-gris">
+                      Ninguna columna del archivo distingue las cuotas por sí
+                      sola. Si el deudor tiene varios créditos, mapeá también
+                      «Nro. de operación»: es la que los separa.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {validation && validation.valid.length > 0 && (
             <MappedPreview rows={validation.valid.slice(0, 3)} currency={currency} />
           )}
@@ -629,7 +721,10 @@ export function UploadWizard({
             <Button variant="outline" onClick={() => setStep(0)}>
               Atrás
             </Button>
-            <Button onClick={() => setStep(2)} disabled={missingRequired.length > 0}>
+            <Button
+              onClick={() => setStep(2)}
+              disabled={missingRequired.length > 0 || repetida !== null}
+            >
               Continuar
             </Button>
           </div>
