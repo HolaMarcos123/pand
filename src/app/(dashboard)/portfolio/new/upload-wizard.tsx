@@ -6,6 +6,14 @@ import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -18,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { SECTORS } from "@/lib/auth/schemas";
+import { saveCamposPropios } from "@/lib/config/actions";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import {
   createPortfolio,
@@ -25,18 +34,29 @@ import {
   importBatch,
   saveColumnMapping,
 } from "@/lib/import/actions";
+import { etiquetaDesdeEncabezado, tipoDesdeMuestra } from "@/lib/import/campo-nuevo";
 import { readSpreadsheet, type SheetData } from "@/lib/import/read-file";
 import { BATCH_SIZE } from "@/lib/import/row-schema";
 import {
+  PREFIJO_PROPIO,
   fieldsFor,
   suggestMapping,
   type MappableKey,
 } from "@/lib/import/sector-config";
 import { errorsToCsv, validateRows } from "@/lib/import/validate-rows";
-import type { CampoPropio } from "@/lib/config/settings";
+import {
+  MAX_CAMPOS_PROPIOS,
+  TIPOS_DE_CAMPO,
+  idDeCampo,
+  type CampoPropio,
+  type TipoDeCampo,
+} from "@/lib/config/settings";
 import type { Sector } from "@/generated/prisma/enums";
 
 const STEPS = ["Archivo", "Mapeo", "Confirmar"] as const;
+
+/** Valor centinela del desplegable: no es un campo, abre el diálogo. */
+const NUEVO_CAMPO = "__nuevo__";
 
 // La clave es un campo de Pand o uno propio de la organizacion
 // ("custom:<id>"), de ahi que sea string y no la union de campos fijos.
@@ -61,16 +81,20 @@ function muestraDe(rows: Record<string, unknown>[], header: string): string {
   return "—";
 }
 
+
 export function UploadWizard({
   defaultSector,
   currency,
   camposPropios,
+  puedeCrearCampos,
   savedMappings,
 }: {
   defaultSector: Sector;
   currency: string;
   /** Las columnas propias de la organizacion, definidas en Config. */
   camposPropios: CampoPropio[];
+  /** Si no, el desplegable no ofrece crear uno: la accion es de admins. */
+  puedeCrearCampos: boolean;
   savedMappings: Record<string, Record<string, string>>;
 }) {
   const router = useRouter();
@@ -90,10 +114,17 @@ export function UploadWizard({
     null,
   );
 
-  const fields = useMemo(
-    () => fieldsFor(sector, camposPropios),
-    [sector, camposPropios],
-  );
+  // Los campos propios se editan desde acá, así que son estado y no solo la
+  // prop: al crear uno tiene que aparecer en el desplegable sin recargar.
+  const [campos, setCampos] = useState<CampoPropio[]>(camposPropios);
+  const [borrador, setBorrador] = useState<{
+    header: string;
+    label: string;
+    tipo: TipoDeCampo;
+  } | null>(null);
+  const [creando, setCreando] = useState(false);
+
+  const fields = useMemo(() => fieldsFor(sector, campos), [sector, campos]);
 
   // Se revalida en cada cambio de mapeo: el usuario ve el impacto al instante en vez
   // de descubrir 4.000 errores recién al final.
@@ -124,6 +155,65 @@ export function UploadWizard({
       if (campo) siguiente[campo] = header;
       return siguiente;
     });
+  }
+
+  /** Abre el diálogo con el nombre y el tipo ya adivinados desde la columna. */
+  function proponerCampo(header: string) {
+    if (!sheet) return;
+
+    if (campos.length >= MAX_CAMPOS_PROPIOS) {
+      toast.error(
+        `Llegaste a los ${MAX_CAMPOS_PROPIOS} campos propios. Borrá alguno en Config → Campos propios.`,
+      );
+      return;
+    }
+
+    setBorrador({
+      header,
+      label: etiquetaDesdeEncabezado(header),
+      tipo: tipoDesdeMuestra(sheet.rows.slice(0, 30).map((row) => row[header])),
+    });
+  }
+
+  /**
+   * Crea el campo propio y le asigna la columna en el acto.
+   *
+   * Se guarda en la configuración de la organización —no es algo de esta carga—
+   * para que la próxima planilla con la misma columna ya lo encuentre hecho.
+   */
+  async function crearCampo() {
+    if (!borrador) return;
+
+    const label = borrador.label.trim();
+    if (label.length === 0) {
+      toast.error("Ponele un nombre al campo.");
+      return;
+    }
+
+    const id = idDeCampo(label);
+    const repetido = campos.find((c) => c.id === id);
+    if (repetido) {
+      toast.error(`Ya existe un campo propio «${repetido.label}». Elegilo de la lista.`);
+      return;
+    }
+
+    const nuevos = [...campos, { id, label, tipo: borrador.tipo }];
+
+    setCreando(true);
+    try {
+      const outcome = await saveCamposPropios({ campos: nuevos });
+      if (!outcome.ok) {
+        toast.error(outcome.error);
+        return;
+      }
+
+      setCampos(nuevos);
+      asignarColumna(borrador.header, `${PREFIJO_PROPIO}${id}`);
+      setBorrador(null);
+      toast.success(`«${label}» queda como campo propio y se importa con esta carga.`);
+    } finally {
+      setCreando(false);
+    }
   }
 
   async function handleFile(file: File) {
@@ -374,9 +464,16 @@ export function UploadWizard({
                       <TableCell>
                         <NativeSelect
                           value={asignado?.key ?? ""}
-                          onChange={(event) =>
-                            asignarColumna(header, event.target.value || null)
-                          }
+                          onChange={(event) => {
+                            const elegido = event.target.value;
+                            // El centinela no es un campo: abre el diálogo y
+                            // deja el mapeo como estaba hasta que se cree.
+                            if (elegido === NUEVO_CAMPO) {
+                              proponerCampo(header);
+                              return;
+                            }
+                            asignarColumna(header, elegido || null);
+                          }}
                         >
                           <option value="">— no importar —</option>
                           {fields.map((field) => {
@@ -394,6 +491,15 @@ export function UploadWizard({
                               </option>
                             );
                           })}
+                          {/* La salida para lo que Pand no modela: sucursal,
+                              auxiliar de cobranza, el nro. de factura del ERP.
+                              Sin esto hay que abandonar la carga, ir a Config a
+                              declarar el campo y volver a subir el archivo. */}
+                          {puedeCrearCampos && (
+                            <option value={NUEVO_CAMPO}>
+                              + Guardar como campo propio…
+                            </option>
+                          )}
                         </NativeSelect>
                       </TableCell>
                     </TableRow>
@@ -410,6 +516,16 @@ export function UploadWizard({
             </strong>{" "}
             de {sheet.headers.length} columnas.
           </p>
+
+          {/* Un supervisor no puede escribir la configuración de la organización,
+              así que en vez del botón ve de quién depende. */}
+          {!puedeCrearCampos && (
+            <p className="text-sm text-pand-gris">
+              ¿Hay una columna que no entra en ningún campo? Un administrador
+              puede agregarla desde Config → Campos propios y después aparece
+              acá como cualquier otro campo.
+            </p>
+          )}
 
           {missingRequired.length > 0 && (
             <p className="text-sm text-pand-coral">
@@ -532,6 +648,89 @@ export function UploadWizard({
           </div>
         </section>
       )}
+
+      <Dialog
+        open={borrador !== null}
+        onOpenChange={(abierto) => {
+          if (!abierto && !creando) setBorrador(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Guardar como campo propio</DialogTitle>
+            <DialogDescription>
+              «{borrador?.header}» no es algo que Pand modele. Guardalo como campo
+              propio y viaja con cada cuota, sin que Pand haga cuentas con él.
+              Queda en la configuración, así que la próxima planilla con esta
+              columna ya lo va a encontrar.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="campo-nuevo-label">Nombre</Label>
+              <Input
+                id="campo-nuevo-label"
+                value={borrador?.label ?? ""}
+                maxLength={60}
+                autoFocus
+                onChange={(event) =>
+                  setBorrador((actual) =>
+                    actual ? { ...actual, label: event.target.value } : actual,
+                  )
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void crearCampo();
+                  }
+                }}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="campo-nuevo-tipo">Tipo</Label>
+              <NativeSelect
+                id="campo-nuevo-tipo"
+                value={borrador?.tipo ?? "texto"}
+                onChange={(event) =>
+                  setBorrador((actual) =>
+                    actual
+                      ? { ...actual, tipo: event.target.value as TipoDeCampo }
+                      : actual,
+                  )
+                }
+              >
+                {TIPOS_DE_CAMPO.map((tipo) => (
+                  <option key={tipo.value} value={tipo.value}>
+                    {tipo.label}
+                  </option>
+                ))}
+              </NativeSelect>
+              {sheet && borrador && (
+                <p className="text-xs text-pand-gris">
+                  En tu archivo trae{" "}
+                  <span className="mono">{muestraDe(sheet.rows, borrador.header)}</span>.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setBorrador(null)}
+              disabled={creando}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={crearCampo} disabled={creando}>
+              {creando && <Loader2 className="size-4 animate-spin" />}
+              Crear y mapear
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

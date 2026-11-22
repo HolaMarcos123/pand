@@ -39,6 +39,10 @@ export default async function NewPortfolioPage() {
       defaultSector={session.organization.sector}
       currency={session.organization.currency}
       camposPropios={session.organization.camposPropios}
+      // Crear un campo propio escribe en la configuración de la organización, y
+      // eso es de administradores. Un supervisor importa igual: ve el aviso de
+      // que el campo lo tiene que crear un admin, en vez de un botón que falla.
+      puedeCrearCampos={session.user.role === "ADMIN"}
       savedMappings={savedMappings}
     />
   );

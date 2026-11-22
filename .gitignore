@@ -38,3 +38,6 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# Config del dev server local (rutas de cada maquina)
+.claude/launch.json
