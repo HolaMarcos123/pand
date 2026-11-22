@@ -6,8 +6,10 @@ import {
   Check,
   Download,
   FileSpreadsheet,
+  History,
   Info,
   Loader2,
+  RotateCcw,
   Upload,
 } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
@@ -47,8 +49,10 @@ import { readSpreadsheet, type SheetData } from "@/lib/import/read-file";
 import { BATCH_SIZE } from "@/lib/import/row-schema";
 import {
   PREFIJO_PROPIO,
+  depurarMapeoGuardado,
   fieldsFor,
   suggestMapping,
+  type MapeoDepurado,
   type MappableKey,
 } from "@/lib/import/sector-config";
 import {
@@ -125,6 +129,15 @@ export function UploadWizard({
 
   // Los campos propios se editan desde acá, así que son estado y no solo la
   // prop: al crear uno tiene que aparecer en el desplegable sin recargar.
+  /**
+   * Lo que adivinamos para este archivo, guardado aparte del mapeo en uso.
+   * Es lo que permite volver atras despues de aplicar un mapeo guardado.
+   */
+  const [sugerencia, setSugerencia] = useState<Mapping>({});
+  const [guardadoAplicado, setGuardadoAplicado] = useState<{
+    descartados: MapeoDepurado["descartados"];
+  } | null>(null);
+
   const [campos, setCampos] = useState<CampoPropio[]>(camposPropios);
   const [borrador, setBorrador] = useState<{
     header: string;
@@ -230,21 +243,24 @@ export function UploadWizard({
       const data = await readSpreadsheet(file);
       setSheet(data);
 
-      // Arranca del mapeo guardado para este sector si existe; si no, adivina por
-      // el nombre de los encabezados.
-      const saved = savedMappings[sector];
       // Con las filas: el adivinador mira el dato y no solo el encabezado.
       const suggested = suggestMapping(data.headers, data.rows);
-      const base: Mapping = saved
-        ? // Solo se conservan las columnas que este archivo realmente trae.
-          Object.fromEntries(
-            Object.entries(saved).filter(([, column]) =>
-              data.headers.includes(column),
-            ),
-          )
-        : {};
+      setSugerencia(suggested);
 
-      setMapping({ ...suggested, ...base });
+      // El mapeo guardado de este sector pisa la sugerencia, pero antes pasa
+      // por el mismo filtro: uno que quedo mal se reaplica para siempre y en
+      // silencio, y eso es justo lo que no se puede ver desde la pantalla.
+      const saved = savedMappings[sector];
+      const depurado = saved
+        ? depurarMapeoGuardado(saved, data.headers, data.rows)
+        : null;
+
+      setMapping({ ...suggested, ...(depurado?.mapeo ?? {}) });
+      setGuardadoAplicado(
+        depurado && Object.keys(depurado.mapeo).length > 0
+          ? { descartados: depurado.descartados }
+          : null,
+      );
       if (!name) setName(file.name.replace(/\.[^.]+$/, ""));
       toast.success(`${formatNumber(data.rows.length)} filas leídas.`);
     } catch (error) {
@@ -437,6 +453,52 @@ export function UploadWizard({
               decidí qué es cada una y dejá en «no importar» lo que no haga falta.
             </p>
           </div>
+
+          {guardadoAplicado && (
+            <div className="rounded-xl border border-pand-border bg-pand-bg p-4">
+              <div className="flex items-start gap-3">
+                <History className="mt-0.5 h-5 w-5 shrink-0 text-pand-azul" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-pand-contorno">
+                    Estás usando un mapeo guardado
+                  </p>
+                  <p className="mt-1 text-xs text-pand-gris">
+                    Viene de una carga anterior de este sector, no de lo que
+                    adivinamos para este archivo.
+                  </p>
+
+                  {guardadoAplicado.descartados.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {guardadoAplicado.descartados.map((d) => (
+                        <li key={d.campo} className="text-xs text-pand-gris">
+                          Descartamos{" "}
+                          <strong className="font-semibold text-pand-contorno">
+                            {fields.find((f) => f.key === d.campo)?.label ?? d.campo}
+                          </strong>{" "}
+                          → <span className="mono">{d.columna}</span>: esa columna{" "}
+                          {d.motivo}.
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMapping(sugerencia);
+                      setGuardadoAplicado(null);
+                      setRememberMapping(false);
+                      toast.success("Volvimos a lo que adivinamos para este archivo.");
+                    }}
+                    className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-pand-azul hover:underline"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    Volver a la sugerencia
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="overflow-x-auto">
             <Table>

@@ -226,6 +226,106 @@ const IDENTIFICADORES = new Set<FieldKey>([
 ]);
 
 /**
+ * Si una columna con esta forma puede ser este campo de Pand.
+ *
+ * `estricto` solo cambia una cosa: si se acepta una columna toda en cero como
+ * monto. En la primera pasada del adivinador no, porque casi siempre es un
+ * "aplicado" sin usar y tomarla como el monto de la deuda deja la cartera en
+ * cero sin que nadie lo note.
+ */
+function compatibleCon(
+  key: FieldKey,
+  clase: ClaseDeColumna,
+  estricto: boolean,
+): boolean {
+  const tipo = BASE.find((f) => f.key === key)?.type;
+
+  if (tipo === "number") {
+    if (clase === "texto" || clase === "fraccion" || clase === "fecha") return false;
+    return estricto ? clase !== "montocero" : true;
+  }
+
+  if (tipo === "date") return clase === "fecha";
+  if (IDENTIFICADORES.has(key)) return clase !== "monto" && clase !== "montocero";
+  return true;
+}
+
+/** La forma de cada columna del archivo, mirando las primeras filas. */
+function clasificar(
+  headers: string[],
+  rows: Record<string, unknown>[],
+): Map<string, ClaseDeColumna> {
+  const muestra = rows.slice(0, 30);
+  const clase = new Map<string, ClaseDeColumna>();
+  for (const header of headers) {
+    clase.set(header, clasificarColumna(muestra.map((row) => row[header])));
+  }
+  return clase;
+}
+
+export type MapeoDepurado = {
+  mapeo: Partial<Record<MappableKey, string>>;
+  /** Lo que se descarto del mapeo guardado, para poder decirlo en pantalla. */
+  descartados: { campo: MappableKey; columna: string; motivo: string }[];
+};
+
+/**
+ * Limpia un mapeo guardado contra el archivo que se esta subiendo.
+ *
+ * Un mapeo guardado se reaplica sin que nadie lo mire, asi que si quedo mal una
+ * vez queda mal para siempre y en silencio. El caso real: "Nro. de cuota"
+ * apuntando a una columna de plata; al importar, dos cuotas del mismo credito
+ * comparten el "375,00" y la carga se corta entera sin que se entienda por que.
+ *
+ * Se aplica el mismo veto que usa el adivinador, con una diferencia: aca no se
+ * es estricto con el monto en cero. Si la persona eligio esa columna a mano
+ * alguna vez, puede tener razon —este archivo quizas si trae todo en cero—;
+ * lo que no puede ser es un identificador tomando una columna de plata.
+ *
+ * Los campos propios nunca se descartan: Pand no hace cuentas con ellos y
+ * ahora aceptan cualquier valor, asi que no hay forma de que esten "mal".
+ */
+export function depurarMapeoGuardado(
+  guardado: Record<string, string>,
+  headers: string[],
+  rows: Record<string, unknown>[] = [],
+): MapeoDepurado {
+  const clase = rows.length > 0 ? clasificar(headers, rows) : null;
+  const mapeo: Partial<Record<MappableKey, string>> = {};
+  const descartados: MapeoDepurado["descartados"] = [];
+
+  for (const [campo, columna] of Object.entries(guardado)) {
+    if (!headers.includes(columna)) continue; // el archivo no trae esa columna
+
+    if (!clase || esCampoPropio(campo)) {
+      mapeo[campo] = columna;
+      continue;
+    }
+
+    const forma = clase.get(columna) ?? "texto";
+    if (compatibleCon(campo as FieldKey, forma, false)) {
+      mapeo[campo] = columna;
+      continue;
+    }
+
+    descartados.push({
+      campo,
+      columna,
+      motivo:
+        forma === "monto" || forma === "montocero"
+          ? "trae importes"
+          : forma === "fecha"
+            ? "trae fechas"
+            : forma === "fraccion"
+              ? "trae cuotas tipo 13/35"
+              : "trae texto",
+    });
+  }
+
+  return { mapeo, descartados };
+}
+
+/**
  * Adivina el mapeo mirando los encabezados Y los datos.
  *
  * Por que los datos: en el cuotero de una financiera conviven "NR_CUO" con
@@ -243,11 +343,7 @@ export function suggestMapping(
 ): Partial<Record<FieldKey, string>> {
   if (rows.length === 0) return matchHeaders(headers, ALIASES);
 
-  const muestra = rows.slice(0, 30);
-  const clase = new Map<FieldKey | string, ClaseDeColumna>();
-  for (const header of headers) {
-    clase.set(header, clasificarColumna(muestra.map((row) => row[header])));
-  }
+  const clase = clasificar(headers, rows);
 
   const yaAsignado: Partial<Record<FieldKey, string>> = {};
 
@@ -264,22 +360,8 @@ export function suggestMapping(
   const fechas = headers.filter((h) => clase.get(h) === "fecha");
   if (fechas.length === 1) yaAsignado.dueDate = fechas[0];
 
-  const compatible = (key: FieldKey, header: string, estricto: boolean) => {
-    const c = clase.get(header) ?? "texto";
-    const tipo = BASE.find((f) => f.key === key)?.type;
-
-    if (tipo === "number") {
-      if (c === "texto" || c === "fraccion" || c === "fecha") return false;
-      // En la primera pasada no se acepta una columna que esta toda en cero:
-      // casi siempre es un "aplicado" o "pagado" sin usar, y tomarla como el
-      // monto de la deuda deja la cartera en cero sin que nadie lo note.
-      return estricto ? c !== "montocero" : true;
-    }
-
-    if (tipo === "date") return c === "fecha";
-    if (IDENTIFICADORES.has(key)) return c !== "monto" && c !== "montocero";
-    return true;
-  };
+  const compatible = (key: FieldKey, header: string, estricto: boolean) =>
+    compatibleCon(key, clase.get(header) ?? "texto", estricto);
 
   const primera = matchHeaders(headers, ALIASES, {
     yaAsignado,

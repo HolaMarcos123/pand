@@ -8,7 +8,10 @@ import {
   suggestPaymentMapping,
 } from "@/lib/import/payment-config";
 import { normalizeHeader } from "@/lib/import/normalize-header";
-import { suggestMapping } from "@/lib/import/sector-config";
+import {
+  depurarMapeoGuardado,
+  suggestMapping,
+} from "@/lib/import/sector-config";
 
 /**
  * El importador es por donde entra toda la cartera de un cliente nuevo. Un mapeo
@@ -235,5 +238,108 @@ describe("suggestMapping — el dato manda sobre el encabezado", () => {
     ];
     // La regla de "una sola fecha" no aplica, así que decide el alias.
     expect(suggestMapping(headers, filas).dueDate).toBe("FCH_VTO");
+  });
+});
+
+/**
+ * Un mapeo guardado se reaplica solo en cada carga del mismo sector. Si quedo
+ * mal una vez, queda mal para siempre y nadie lo ve: por eso pasa por el mismo
+ * veto que el adivinador.
+ *
+ * El caso real: "Nro. de cuota" apuntando a una columna de importes. Al
+ * importar, dos cuotas del mismo credito compartian el "375,00" y la carga se
+ * cortaba entera con un error que no mencionaba al mapeo guardado.
+ */
+describe("depurarMapeoGuardado", () => {
+  const HEADERS = ["NRO_CLI", "CLIENTE", "NR_CUO", "CUOTA", "FCH_VTO"];
+  const FILAS = [
+    { NRO_CLI: "1001", CLIENTE: "Juan Perez", NR_CUO: "13/35", CUOTA: "375,00", FCH_VTO: "2026-08-15" },
+    { NRO_CLI: "1002", CLIENTE: "Ana Gomez", NR_CUO: "5/24", CUOTA: "860,00", FCH_VTO: "2026-09-15" },
+  ];
+
+  it("descarta un identificador que apunta a una columna de importes", () => {
+    const { mapeo, descartados } = depurarMapeoGuardado(
+      { invoiceNumber: "CUOTA", name: "CLIENTE" },
+      HEADERS,
+      FILAS,
+    );
+
+    expect(mapeo.invoiceNumber).toBeUndefined();
+    expect(mapeo.name).toBe("CLIENTE");
+    expect(descartados).toEqual([
+      { campo: "invoiceNumber", columna: "CUOTA", motivo: "trae importes" },
+    ]);
+  });
+
+  it("descarta un vencimiento que no apunta a una columna de fechas", () => {
+    const { mapeo, descartados } = depurarMapeoGuardado(
+      { dueDate: "CLIENTE" },
+      HEADERS,
+      FILAS,
+    );
+
+    expect(mapeo.dueDate).toBeUndefined();
+    expect(descartados[0]?.motivo).toBe("trae texto");
+  });
+
+  it("descarta un monto que apunta a una columna de texto", () => {
+    const { mapeo } = depurarMapeoGuardado({ amount: "CLIENTE" }, HEADERS, FILAS);
+    expect(mapeo.amount).toBeUndefined();
+  });
+
+  it("conserva el mapeo que si coincide con los datos", () => {
+    const guardado = {
+      externalId: "NRO_CLI",
+      name: "CLIENTE",
+      invoiceNumber: "NR_CUO",
+      amount: "CUOTA",
+      dueDate: "FCH_VTO",
+    };
+    const { mapeo, descartados } = depurarMapeoGuardado(guardado, HEADERS, FILAS);
+
+    expect(mapeo).toEqual(guardado);
+    expect(descartados).toHaveLength(0);
+  });
+
+  it("ignora columnas que este archivo no trae, sin reportarlas", () => {
+    const { mapeo, descartados } = depurarMapeoGuardado(
+      { name: "CLIENTE", product: "LINEA_QUE_NO_EXISTE" },
+      HEADERS,
+      FILAS,
+    );
+
+    expect(mapeo).toEqual({ name: "CLIENTE" });
+    expect(descartados).toHaveLength(0);
+  });
+
+  it("nunca descarta un campo propio: acepta cualquier valor", () => {
+    const { mapeo, descartados } = depurarMapeoGuardado(
+      { "custom:sucursal": "CUOTA" },
+      HEADERS,
+      FILAS,
+    );
+
+    expect(mapeo["custom:sucursal"]).toBe("CUOTA");
+    expect(descartados).toHaveLength(0);
+  });
+
+  it("sin filas de muestra no veta nada: no hay con que juzgar", () => {
+    const { mapeo, descartados } = depurarMapeoGuardado(
+      { invoiceNumber: "CUOTA" },
+      HEADERS,
+    );
+
+    expect(mapeo.invoiceNumber).toBe("CUOTA");
+    expect(descartados).toHaveLength(0);
+  });
+
+  it("acepta un monto todo en cero elegido a mano, que el adivinador vetaria", () => {
+    // El adivinador es estricto con "montocero" porque suele ser un "aplicado"
+    // sin usar. Pero si la persona lo eligio, este archivo puede traer todo en
+    // cero de verdad: no se le discute.
+    const filas = [{ APLICADO: "0,00" }, { APLICADO: "0,00" }];
+    const { mapeo } = depurarMapeoGuardado({ amount: "APLICADO" }, ["APLICADO"], filas);
+
+    expect(mapeo.amount).toBe("APLICADO");
   });
 });
