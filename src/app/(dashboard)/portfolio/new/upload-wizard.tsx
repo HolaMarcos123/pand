@@ -1,7 +1,15 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Check, Download, FileSpreadsheet, Loader2, Upload } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Download,
+  FileSpreadsheet,
+  Info,
+  Loader2,
+  Upload,
+} from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -26,7 +34,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { SECTORS } from "@/lib/auth/schemas";
-import { saveCamposPropios } from "@/lib/config/actions";
+import { agregarCampoPropio } from "@/lib/config/actions";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import {
   createPortfolio,
@@ -43,7 +51,11 @@ import {
   suggestMapping,
   type MappableKey,
 } from "@/lib/import/sector-config";
-import { errorsToCsv, validateRows } from "@/lib/import/validate-rows";
+import {
+  errorsToCsv,
+  validateRows,
+  type Aviso,
+} from "@/lib/import/validate-rows";
 import {
   MAX_CAMPOS_PROPIOS,
   TIPOS_DE_CAMPO,
@@ -86,15 +98,12 @@ export function UploadWizard({
   defaultSector,
   currency,
   camposPropios,
-  puedeCrearCampos,
   savedMappings,
 }: {
   defaultSector: Sector;
   currency: string;
   /** Las columnas propias de la organizacion, definidas en Config. */
   camposPropios: CampoPropio[];
-  /** Si no, el desplegable no ofrece crear uno: la accion es de admins. */
-  puedeCrearCampos: boolean;
   savedMappings: Record<string, Record<string, string>>;
 }) {
   const router = useRouter();
@@ -190,25 +199,24 @@ export function UploadWizard({
       return;
     }
 
-    const id = idDeCampo(label);
-    const repetido = campos.find((c) => c.id === id);
+    const repetido = campos.find((c) => c.id === idDeCampo(label));
     if (repetido) {
       toast.error(`Ya existe un campo propio «${repetido.label}». Elegilo de la lista.`);
       return;
     }
 
-    const nuevos = [...campos, { id, label, tipo: borrador.tipo }];
-
     setCreando(true);
     try {
-      const outcome = await saveCamposPropios({ campos: nuevos });
+      // Solo agrega: el servidor resuelve el id y vuelve a chequear el duplicado
+      // contra la base, por si alguien creó el mismo campo mientras tanto.
+      const outcome = await agregarCampoPropio({ label, tipo: borrador.tipo });
       if (!outcome.ok) {
         toast.error(outcome.error);
         return;
       }
 
-      setCampos(nuevos);
-      asignarColumna(borrador.header, `${PREFIJO_PROPIO}${id}`);
+      setCampos((actuales) => [...actuales, outcome.campo]);
+      asignarColumna(borrador.header, `${PREFIJO_PROPIO}${outcome.campo.id}`);
       setBorrador(null);
       toast.success(`«${label}» queda como campo propio y se importa con esta carga.`);
     } finally {
@@ -495,11 +503,9 @@ export function UploadWizard({
                               auxiliar de cobranza, el nro. de factura del ERP.
                               Sin esto hay que abandonar la carga, ir a Config a
                               declarar el campo y volver a subir el archivo. */}
-                          {puedeCrearCampos && (
-                            <option value={NUEVO_CAMPO}>
-                              + Guardar como campo propio…
-                            </option>
-                          )}
+                          <option value={NUEVO_CAMPO}>
+                            + Guardar como campo propio…
+                          </option>
                         </NativeSelect>
                       </TableCell>
                     </TableRow>
@@ -517,15 +523,7 @@ export function UploadWizard({
             de {sheet.headers.length} columnas.
           </p>
 
-          {/* Un supervisor no puede escribir la configuración de la organización,
-              así que en vez del botón ve de quién depende. */}
-          {!puedeCrearCampos && (
-            <p className="text-sm text-pand-gris">
-              ¿Hay una columna que no entra en ningún campo? Un administrador
-              puede agregarla desde Config → Campos propios y después aparece
-              acá como cualquier otro campo.
-            </p>
-          )}
+          {validation && <Avisos avisos={validation.avisos} />}
 
           {missingRequired.length > 0 && (
             <p className="text-sm text-pand-coral">
@@ -579,6 +577,8 @@ export function UploadWizard({
               alert={validation.errors.length > 0}
             />
           </dl>
+
+          <Avisos avisos={validation.avisos} />
 
           {validation.errors.length > 0 && (
             <div className="rounded-xl border border-pand-border bg-pand-bg p-4">
@@ -731,6 +731,44 @@ export function UploadWizard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * Los campos propios cuyo tipo no coincidió con el dato. No es un error: la
+ * fila entra igual y el valor se guarda como texto. Se muestra para que la
+ * persona pueda corregir el tipo en Config si le importa, no para frenarla.
+ */
+function Avisos({ avisos }: { avisos: Aviso[] }) {
+  if (avisos.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-pand-border bg-pand-bg p-4">
+      <div className="flex items-start gap-3">
+        <Info className="mt-0.5 h-5 w-5 shrink-0 text-pand-azul" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-pand-contorno">
+            Se guardan como texto
+          </p>
+          <ul className="mt-2 space-y-1">
+            {avisos.map((aviso) => (
+              <li key={aviso.field} className="text-xs text-pand-gris">
+                <strong className="font-semibold text-pand-contorno">
+                  {aviso.field}
+                </strong>{" "}
+                · {formatNumber(aviso.count)}{" "}
+                {aviso.count === 1 ? "valor no entró" : "valores no entraron"} en
+                el tipo elegido (ej. <span className="mono">{aviso.ejemplo}</span>
+                ). Se importan igual, como texto.
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-pand-gris">
+            Si el tipo quedó mal, cambialo en Config → Campos propios.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

@@ -194,3 +194,98 @@ describe("validateRows — moneda", () => {
     expect(valid[0]?.currency).toBeNull();
   });
 });
+
+/**
+ * Un campo propio es un dato accesorio: va al `metadata` del comprobante y Pand
+ * no hace cuentas con el. Si el tipo declarado no le queda, el problema es el
+ * tipo, no la deuda — asi que la fila tiene que entrar igual.
+ *
+ * El caso real: una columna "Telef3" declarada como numero recibia
+ * "0985-925618" y descartaba 175 cuotas de una cartera de 4.833.
+ */
+describe("validateRows — campos propios", () => {
+  const CAMPOS_CON_TELEFONO = fieldsFor("FINANCIAL", [
+    { id: "telef3", label: "Telef3", tipo: "numero" },
+  ]);
+  const MAPEO_CON_TELEFONO = { ...MAPEO, "custom:telef3": "Telef3" };
+
+  it("no descarta la fila cuando el valor no entra en el tipo declarado", () => {
+    const { valid, errors } = validateRows(
+      [fila({ Telef3: "0985-925618" })],
+      MAPEO_CON_TELEFONO,
+      CAMPOS_CON_TELEFONO,
+    );
+
+    expect(errors).toHaveLength(0);
+    expect(valid).toHaveLength(1);
+  });
+
+  it("conserva el valor crudo como texto en vez de perderlo", () => {
+    const { valid } = validateRows(
+      [fila({ Telef3: "0985-925618" })],
+      MAPEO_CON_TELEFONO,
+      CAMPOS_CON_TELEFONO,
+    );
+
+    expect(valid[0]?.custom).toEqual({ telef3: "0985-925618" });
+  });
+
+  it("avisa una sola vez por campo, con la cuenta y un ejemplo", () => {
+    const { avisos } = validateRows(
+      [
+        fila({ Telef3: "0985-925618" }),
+        fila({ Telef3: "0981-111222" }),
+        fila({ Telef3: "0982-333444" }),
+      ],
+      MAPEO_CON_TELEFONO,
+      CAMPOS_CON_TELEFONO,
+    );
+
+    expect(avisos).toHaveLength(1);
+    expect(avisos[0]).toMatchObject({
+      field: "Telef3",
+      count: 3,
+      ejemplo: "0985-925618",
+    });
+  });
+
+  it("no avisa cuando el valor si entra en el tipo", () => {
+    const { avisos, valid } = validateRows(
+      [fila({ Telef3: "985925618" })],
+      MAPEO_CON_TELEFONO,
+      CAMPOS_CON_TELEFONO,
+    );
+
+    expect(avisos).toHaveLength(0);
+    expect(valid[0]?.custom).toEqual({ telef3: 985925618 });
+  });
+
+  it("un campo de Pand con el mismo problema si descarta la fila", () => {
+    // El contraste importa: aflojar con los campos propios no puede aflojar
+    // con el monto de la deuda, que es lo que se gestiona.
+    const { valid, errors } = validateRows(
+      [fila({ Monto: "0985-925618" })],
+      MAPEO,
+      CAMPOS,
+    );
+
+    expect(valid).toHaveLength(0);
+    expect(errors[0]?.field).toBe("Monto de la cuota");
+  });
+
+  it("una fecha propia que no se entiende tampoco descarta la fila", () => {
+    const campos = fieldsFor("FINANCIAL", [
+      { id: "ultima_visita", label: "Última visita", tipo: "fecha" },
+    ]);
+
+    const { valid, avisos } = validateRows(
+      [fila({ Visita: "sin datos" })],
+      { ...MAPEO, "custom:ultima_visita": "Visita" },
+      campos,
+    );
+
+    expect(valid).toHaveLength(1);
+    expect(valid[0]?.custom).toEqual({ ultima_visita: "sin datos" });
+    expect(avisos[0]?.field).toBe("Última visita");
+  });
+});

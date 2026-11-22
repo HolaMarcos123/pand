@@ -8,9 +8,14 @@ import { requireSession } from "@/lib/auth/session";
 import {
   MAX_CAMPOS_PROPIOS,
   MONEDAS,
+  TIPOS_DE_CAMPO,
   ZONAS_HORARIAS,
+  idDeCampo,
+  resolverSettings,
   settingsGuardadosSchema,
+  type CampoPropio,
   type SettingsGuardados,
+  type TipoDeCampo,
 } from "@/lib/config/settings";
 import { prisma } from "@/lib/prisma";
 
@@ -230,4 +235,75 @@ export async function saveCamposPropios(
   revalidatePath("/portfolio/new");
 
   return { ok: true };
+}
+
+const campoNuevoSchema = z.object({
+  label: z.string().trim().min(1).max(60),
+  tipo: z.enum(TIPOS_DE_CAMPO.map((t) => t.value) as [TipoDeCampo, ...TipoDeCampo[]]),
+});
+
+export type CampoAgregado =
+  | { ok: true; campo: CampoPropio }
+  | { ok: false; error: string };
+
+/**
+ * Agrega un campo propio sin tocar los que ya están.
+ *
+ * Va aparte de `saveCamposPropios` —que reemplaza la lista entera y es de
+ * administradores— porque quien importa una cartera es muchas veces un
+ * supervisor, y frenarlo hasta que aparezca un admin es frenar la carga
+ * entera. Agregar es la operación segura: no renombra ni borra, así que no
+ * puede esconder datos ya importados ni romper un mapeo guardado.
+ *
+ * Lee la lista de la base y no de la sesión: dos personas mapeando a la vez
+ * tienen que sumar sus campos, no pisarse.
+ */
+export async function agregarCampoPropio(
+  input: z.infer<typeof campoNuevoSchema>,
+): Promise<CampoAgregado> {
+  const session = await requireSession();
+  if (session.user.role === "OPERATOR") {
+    return { ok: false, error: "No tenés permiso para crear campos propios." };
+  }
+
+  const parsed = campoNuevoSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Ponele un nombre al campo." };
+  }
+
+  const organization = await prisma.organization.findUniqueOrThrow({
+    where: { id: session.organization.id },
+    select: { settings: true },
+  });
+  const actuales = resolverSettings(organization.settings).camposPropios;
+
+  const campo: CampoPropio = {
+    id: idDeCampo(parsed.data.label),
+    label: parsed.data.label,
+    tipo: parsed.data.tipo,
+  };
+
+  const repetido = actuales.find((c) => c.id === campo.id);
+  if (repetido) {
+    return {
+      ok: false,
+      error: `Ya existe un campo propio «${repetido.label}». Elegilo de la lista.`,
+    };
+  }
+
+  if (actuales.length >= MAX_CAMPOS_PROPIOS) {
+    return {
+      ok: false,
+      error: `Llegaste a los ${MAX_CAMPOS_PROPIOS} campos propios. Borrá alguno en Config → Campos propios.`,
+    };
+  }
+
+  await mergeSettings(session.organization.id, {
+    camposPropios: [...actuales, campo],
+  });
+
+  revalidatePath("/admin/settings/campos");
+  revalidatePath("/portfolio/new");
+
+  return { ok: true, campo };
 }

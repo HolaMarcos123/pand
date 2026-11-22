@@ -12,9 +12,21 @@ import {
   type MappableKey,
 } from "@/lib/import/sector-config";
 
+/**
+ * Un campo propio cuyo valor no entró en el tipo declarado. No descarta nada:
+ * se cuenta y se avisa, agrupado por campo, porque reportarlo fila por fila en
+ * una cartera de 5.000 llena la pantalla con la misma línea repetida.
+ */
+export type Aviso = {
+  field: string;
+  count: number;
+  ejemplo: string;
+};
+
 export type ValidationOutcome = {
   valid: MappedRow[];
   errors: RowError[];
+  avisos: Aviso[];
 };
 
 /**
@@ -24,6 +36,13 @@ export type ValidationOutcome = {
  * Una fila con cualquier error se descarta entera y se reporta. No se importa "a
  * medias": una factura sin vencimiento o sin monto no es una deuda que se pueda
  * gestionar, y dejarla entrar con ceros ensucia todos los KPIs.
+ *
+ * Los campos propios son la excepción, y es a propósito. Son datos que la
+ * organización quiere conservar pero con los que Pand no hace cuentas: terminan
+ * en el `metadata` del comprobante. Si un campo declarado "numero" recibe
+ * "0985-925618", el tipo está mal elegido —no la deuda—, así que se guarda el
+ * texto crudo y la fila entra igual. Descartarla costaba la cuota entera por un
+ * dato accesorio.
  */
 export function validateRows(
   rows: Record<string, unknown>[],
@@ -32,6 +51,16 @@ export function validateRows(
 ): ValidationOutcome {
   const valid: MappedRow[] = [];
   const errors: RowError[] = [];
+  const avisos = new Map<string, Aviso>();
+
+  const avisar = (field: string, valor: unknown) => {
+    const existente = avisos.get(field);
+    if (existente) {
+      existente.count += 1;
+      return;
+    }
+    avisos.set(field, { field, count: 1, ejemplo: String(valor).trim().slice(0, 40) });
+  };
 
   rows.forEach((raw, index) => {
     // +2: la fila 1 son los encabezados y los humanos cuentan desde 1, así que este
@@ -47,13 +76,29 @@ export function validateRows(
       const column = mapping[field.key];
       const value = column ? raw[column] : undefined;
 
+      const propio = esCampoPropio(field.key);
+
       /** Donde se guarda el valor ya convertido de este campo. */
       const guardar = (v: unknown) => {
-        if (esCampoPropio(field.key)) {
+        if (propio) {
           propios[idDelCampoPropio(field.key)] = v as string | number | null;
         } else {
           built[field.key] = v;
         }
+      };
+
+      /**
+       * Un valor que no entró en el tipo. En un campo de Pand descarta la fila;
+       * en uno propio se conserva como texto y solo se avisa.
+       */
+      const noEntro = (reason: string) => {
+        if (propio) {
+          guardar(String(value).trim());
+          avisar(field.label, value);
+          return;
+        }
+        errors.push({ row: rowNumber, field: field.label, message: reason });
+        failed = true;
       };
 
       if (field.type === "number") {
@@ -68,8 +113,7 @@ export function validateRows(
             guardar(null);
           }
         } else {
-          errors.push({ row: rowNumber, field: field.label, message: result.reason });
-          failed = true;
+          noEntro(result.reason);
         }
         continue;
       }
@@ -86,8 +130,7 @@ export function validateRows(
             guardar(null);
           }
         } else {
-          errors.push({ row: rowNumber, field: field.label, message: result.reason });
-          failed = true;
+          noEntro(result.reason);
         }
         continue;
       }
@@ -126,7 +169,7 @@ export function validateRows(
     if (!failed) valid.push(built as MappedRow);
   });
 
-  return { valid, errors };
+  return { valid, errors, avisos: [...avisos.values()] };
 }
 
 /** CSV de errores para descargar, con BOM para que Excel respete los acentos. */
