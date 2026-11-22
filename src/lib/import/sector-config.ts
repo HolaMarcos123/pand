@@ -196,8 +196,11 @@ const ALIASES: Record<FieldKey, string[]> = {
   name: ["nombre", "razonsocial", "titular", "deudor", "nombredeudor", "cliente", "nombrecompleto"],
   documentNumber: ["documento", "ci", "ruc", "cedula", "dni", "cuit", "nrodocumento", "documentnumber"],
   email: ["email", "correo", "mail", "correoelectronico"],
-  phone: ["telef1", "tel1", "telefono1", "telefono", "tel", "celular", "movil", "phone", "contacto"],
-  phoneAlt: ["telef2", "tel2", "telefono2", "telalternativo", "telefonoalternativo", "celular2", "otrotelefono"],
+  // "telef3" explicito: sin el, "tel" por prefijo se llevaba cualquier cosa, y
+  // en un cuotero real TELEF1 y TELEF2 vienen vacias y el unico telefono con
+  // datos es el tercero.
+  phone: ["telef1", "tel1", "telef3", "tel3", "telefono1", "telefono", "tel", "celular", "movil", "phone", "contacto"],
+  phoneAlt: ["telef2", "tel2", "telef3", "tel3", "telefono2", "telalternativo", "telefonoalternativo", "celular2", "otrotelefono"],
   loanNumber: ["operacion", "nrooperacion", "oper", "prestamo", "nroprestamo", "credito", "nrocredito", "contrato", "nrocontrato", "solicitud", "nrosolicitud"],
   // "nrcuo" y "cuo" van explicitas: la planilla real escribe "NR_CUO", que al
   // normalizar queda "nrcuo" y no matcheaba contra "nrocuo".
@@ -238,6 +241,12 @@ function compatibleCon(
   clase: ClaseDeColumna,
   estricto: boolean,
 ): boolean {
+  // Una columna sin un solo valor no sirve para ningun campo. El caso real:
+  // un cuotero trae "CONTRATO" vacia de punta a punta; el alias la tomaba como
+  // "Nro. de operacion", y con la operacion ocupada por una columna que no dice
+  // nada, los dos creditos del mismo deudor quedaban sin nada que los separe.
+  if (clase === "vacia") return false;
+
   const tipo = BASE.find((f) => f.key === key)?.type;
 
   if (tipo === "number") {
@@ -250,15 +259,39 @@ function compatibleCon(
   return true;
 }
 
-/** La forma de cada columna del archivo, mirando las primeras filas. */
-function clasificar(
+/**
+ * La forma de cada columna del archivo.
+ *
+ * Se juntan los primeros 30 valores CON contenido de cada columna, no las
+ * primeras 30 filas. La diferencia importa: en un cuotero real hay columnas que
+ * recien traen algo en la fila 400, y clasificarlas por las primeras 30 filas
+ * las daba por vacias. Al reves tambien: una columna vacia en todo el archivo
+ * queda marcada como tal y deja de competir con la que si identifica.
+ */
+const MUESTRA = 30;
+
+export function clasificarColumnas(
   headers: string[],
   rows: Record<string, unknown>[],
 ): Map<string, ClaseDeColumna> {
-  const muestra = rows.slice(0, 30);
+  const muestras = new Map<string, unknown[]>(headers.map((h) => [h, []]));
+
+  for (const row of rows) {
+    let faltan = false;
+    for (const header of headers) {
+      const valores = muestras.get(header)!;
+      if (valores.length >= MUESTRA) continue;
+      faltan = true;
+      const valor = row[header];
+      if (valor === null || valor === undefined || String(valor).trim() === "") continue;
+      valores.push(valor);
+    }
+    if (!faltan) break;
+  }
+
   const clase = new Map<string, ClaseDeColumna>();
   for (const header of headers) {
-    clase.set(header, clasificarColumna(muestra.map((row) => row[header])));
+    clase.set(header, clasificarColumna(muestras.get(header)!));
   }
   return clase;
 }
@@ -290,7 +323,7 @@ export function depurarMapeoGuardado(
   headers: string[],
   rows: Record<string, unknown>[] = [],
 ): MapeoDepurado {
-  const clase = rows.length > 0 ? clasificar(headers, rows) : null;
+  const clase = rows.length > 0 ? clasificarColumnas(headers, rows) : null;
   const mapeo: Partial<Record<MappableKey, string>> = {};
   const descartados: MapeoDepurado["descartados"] = [];
 
@@ -312,7 +345,9 @@ export function depurarMapeoGuardado(
       campo,
       columna,
       motivo:
-        forma === "monto" || forma === "montocero"
+        forma === "vacia"
+          ? "viene vacía"
+          : forma === "monto" || forma === "montocero"
           ? "trae importes"
           : forma === "fecha"
             ? "trae fechas"
@@ -343,7 +378,7 @@ export function suggestMapping(
 ): Partial<Record<FieldKey, string>> {
   if (rows.length === 0) return matchHeaders(headers, ALIASES);
 
-  const clase = clasificar(headers, rows);
+  const clase = clasificarColumnas(headers, rows);
 
   const yaAsignado: Partial<Record<FieldKey, string>> = {};
 

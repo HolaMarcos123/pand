@@ -49,7 +49,7 @@ import {
 import { etiquetaDesdeEncabezado, tipoDesdeMuestra } from "@/lib/import/campo-nuevo";
 import {
   detectarCuotaRepetida,
-  sugerirColumnaDeCuota,
+  sugerirArreglo,
 } from "@/lib/import/duplicados";
 import { readSpreadsheet, type SheetData } from "@/lib/import/read-file";
 import { BATCH_SIZE } from "@/lib/import/row-schema";
@@ -175,10 +175,10 @@ export function UploadWizard({
     [validation],
   );
 
-  /** Qué columna serviría como "Nro. de cuota". Solo se busca si hay choque. */
+  /** Qué columna distinguiría las deudas. Solo se busca si hay choque. */
   const sugerida = useMemo(() => {
     if (!repetida || !sheet) return null;
-    return sugerirColumnaDeCuota(sheet.rows, sheet.headers, {
+    return sugerirArreglo(sheet.rows, sheet.headers, {
       externalId: mapping.externalId,
       loanNumber: mapping.loanNumber,
       invoiceNumber: mapping.invoiceNumber,
@@ -187,6 +187,11 @@ export function UploadWizard({
       currency: mapping.currency,
     });
   }, [repetida, sheet, mapping]);
+
+  /** Cómo se llama en esta pantalla el campo que la sugerencia quiere mapear. */
+  const etiquetaDelArreglo = sugerida
+    ? (fields.find((f) => f.key === sugerida.rol)?.label ?? "")
+    : "";
 
   /**
    * Asigna una columna del archivo a un campo de Pand.
@@ -648,7 +653,8 @@ export function UploadWizard({
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-pand-contorno">
                     Hay {formatNumber(repetida.total)}{" "}
-                    {repetida.total === 1 ? "deuda repetida" : "deudas repetidas"}
+                    {repetida.total === 1 ? "deuda que no se distingue" : "deudas que no se distinguen"}{" "}
+                    entre sí
                   </p>
                   <p className="mt-1 text-xs text-pand-gris">
                     El deudor <span className="mono">{repetida.externalId}</span>{" "}
@@ -665,38 +671,63 @@ export function UploadWizard({
                     )}
                     , con deudas distintas (filas{" "}
                     <span className="mono">{repetida.filas[0]}</span> y{" "}
-                    <span className="mono">{repetida.filas[1]}</span>). Así no se
-                    puede saber cuál es la deuda.
+                    <span className="mono">{repetida.filas[1]}</span>). Con este
+                    mapeo las dos entrarían como una sola.
                   </p>
 
                   {sugerida ? (
                     <>
-                      <p className="mt-2 text-xs text-pand-gris">
-                        {sugerida.restantes === 0 ? (
-                          <>
-                            La columna{" "}
-                            <strong className="font-semibold text-pand-contorno">
-                              {sugerida.columna}
-                            </strong>{" "}
-                            sí distingue cada cuota de este archivo. Suele pasar
-                            con los cuoteros: el número de comprobante es el del
-                            crédito y se repite en todas sus cuotas.
-                          </>
-                        ) : (
-                          <>
-                            La que más se acerca es{" "}
-                            <strong className="font-semibold text-pand-contorno">
-                              {sugerida.columna}
-                            </strong>
-                            : bajaría de {formatNumber(repetida.total)} a{" "}
-                            {formatNumber(sugerida.restantes)}. Si queda alguna,
-                            suele faltar mapear «Nro. de operación», que separa
-                            los créditos de un mismo deudor.
-                          </>
-                        )}
-                      </p>
+                      {sugerida.rol === "loanNumber" ? (
+                        <p className="mt-2 text-xs text-pand-gris">
+                          Falta mapear{" "}
+                          <strong className="font-semibold text-pand-contorno">
+                            «{etiquetaDelArreglo}»
+                          </strong>
+                          : la columna{" "}
+                          <strong className="font-semibold text-pand-contorno">
+                            {sugerida.columna}
+                          </strong>{" "}
+                          separa los créditos de un mismo deudor
+                          {sugerida.restantes === 0 ? (
+                            <>, y con ella no queda ninguna sin distinguir</>
+                          ) : (
+                            <>
+                              , y bajarían de {formatNumber(sugerida.antes)} a{" "}
+                              {formatNumber(sugerida.restantes)}
+                            </>
+                          )}
+                          . Pasa cuando un cliente tiene más de un crédito a la
+                          vez: las dos cuotas son reales y hay que cobrar las
+                          dos.
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-xs text-pand-gris">
+                          {sugerida.restantes === 0 ? (
+                            <>
+                              La columna{" "}
+                              <strong className="font-semibold text-pand-contorno">
+                                {sugerida.columna}
+                              </strong>{" "}
+                              sí distingue cada cuota de este archivo. Suele
+                              pasar con los cuoteros: el número de comprobante
+                              es el del crédito y se repite en todas sus cuotas.
+                            </>
+                          ) : (
+                            <>
+                              La que más se acerca es{" "}
+                              <strong className="font-semibold text-pand-contorno">
+                                {sugerida.columna}
+                              </strong>
+                              : bajaría de {formatNumber(sugerida.antes)} a{" "}
+                              {formatNumber(sugerida.restantes)}. Si queda
+                              alguna, suele faltar mapear «Nro. de operación»,
+                              que separa los créditos de un mismo deudor.
+                            </>
+                          )}
+                        </p>
+                      )}
 
-                      {sugerida.vacias > 0 && (
+                      {sugerida.rol === "invoiceNumber" && sugerida.vacias > 0 && (
                         <p className="mt-1 text-xs text-pand-gris">
                           Ojo: {formatNumber(sugerida.vacias)}{" "}
                           {sugerida.vacias === 1 ? "fila no trae" : "filas no traen"}{" "}
@@ -708,15 +739,15 @@ export function UploadWizard({
                       <button
                         type="button"
                         onClick={() => {
-                          asignarColumna(sugerida.columna, "invoiceNumber");
+                          asignarColumna(sugerida.columna, sugerida.rol);
                           toast.success(
-                            `«Nro. de cuota» ahora toma ${sugerida.columna}.`,
+                            `«${etiquetaDelArreglo}» ahora toma ${sugerida.columna}.`,
                           );
                         }}
                         className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-pand-azul hover:underline"
                       >
                         <Wand2 className="h-3 w-3" />
-                        Usar {sugerida.columna} como Nro. de cuota
+                        Usar {sugerida.columna} como {etiquetaDelArreglo}
                       </button>
                     </>
                   ) : (

@@ -342,4 +342,71 @@ describe("depurarMapeoGuardado", () => {
 
     expect(mapeo.amount).toBe("APLICADO");
   });
+  /**
+   * "CIUDAD" empieza con "ci" y el prefijo suelto se la llevaba a CI/RUC,
+   * dejando "NRO_DOCUMENTO" —el documento de verdad— sin asignar. Un prefijo
+   * solo vale si corta donde corta una palabra.
+   */
+  it("no confunde CIUDAD con el alias ci de CI/RUC", () => {
+    const filas = [
+      { NRO_CLI: "CLI-1", CIUDAD: "LUQUE", NRO_DOCUMENTO: "796273-8" },
+      { NRO_CLI: "CLI-2", CIUDAD: "ASUNCION", NRO_DOCUMENTO: "123456-7" },
+    ];
+    const mapeo = suggestMapping(["NRO_CLI", "CIUDAD", "NRO_DOCUMENTO"], filas);
+
+    expect(mapeo.documentNumber).toBe("NRO_DOCUMENTO");
+  });
+
+  it("un prefijo que termina en numero si vale: TELEF1 es un telefono", () => {
+    const filas = [
+      { TELEF1: "0981-111111", TELEF2: "0982-222222" },
+      { TELEF1: "0981-333333", TELEF2: "0982-444444" },
+    ];
+    const mapeo = suggestMapping(["TELEF1", "TELEF2"], filas);
+
+    expect(mapeo.phone).toBe("TELEF1");
+    expect(mapeo.phoneAlt).toBe("TELEF2");
+  });
+
+  /**
+   * En el cuotero real TELEF1 y TELEF2 vienen vacias de punta a punta y el
+   * unico telefono con datos es el tercero. Una columna vacia no se mapea.
+   */
+  it("con TELEF1 y TELEF2 vacias, el telefono es TELEF3", () => {
+    const filas = [
+      { TELEF1: "", TELEF2: "", TELEF3: "971665535" },
+      { TELEF1: "", TELEF2: "", TELEF3: "985925618" },
+    ];
+    const mapeo = suggestMapping(["TELEF1", "TELEF2", "TELEF3"], filas);
+
+    expect(mapeo.phone).toBe("TELEF3");
+    expect(mapeo.phoneAlt).toBeUndefined();
+  });
+
+  it("no mapea una columna vacia en todo el archivo", () => {
+    // Caso real: "CONTRATO" matchea el alias de "Nro. de operacion" pero no
+    // trae un solo valor, y ocuparla deja los dos creditos del mismo deudor
+    // sin nada que los separe.
+    const filas = [
+      { NRO_CLI: "CLI-1", CONTRATO: "", NR_FACTURA: "92291-038-001-0000352" },
+      { NRO_CLI: "CLI-1", CONTRATO: "", NR_FACTURA: "92880-038-001-0000356" },
+    ];
+    const mapeo = suggestMapping(["NRO_CLI", "CONTRATO", "NR_FACTURA"], filas);
+
+    expect(mapeo.loanNumber).toBeUndefined();
+  });
+
+  it("descarta del mapeo guardado una columna que este archivo trae vacia", () => {
+    const filas = [{ CONTRATO: "" }, { CONTRATO: "" }];
+    const { mapeo, descartados } = depurarMapeoGuardado(
+      { loanNumber: "CONTRATO" },
+      ["CONTRATO"],
+      filas,
+    );
+
+    expect(mapeo.loanNumber).toBeUndefined();
+    expect(descartados).toEqual([
+      { campo: "loanNumber", columna: "CONTRATO", motivo: "viene vacía" },
+    ]);
+  });
 });

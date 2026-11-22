@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  detectarCuotaRepetida,
-  sugerirColumnaDeCuota,
-} from "@/lib/import/duplicados";
+import { detectarCuotaRepetida, sugerirArreglo } from "@/lib/import/duplicados";
 import type { MappedRow } from "@/lib/import/row-schema";
 
 /**
@@ -112,7 +109,7 @@ describe("detectarCuotaRepetida", () => {
   });
 });
 
-describe("sugerirColumnaDeCuota", () => {
+describe("sugerirArreglo", () => {
   // El cuotero de la captura: NR_FACTURA repite por credito, NR_CUO no.
   const HEADERS = [
     "NRO_CLI", "SUCURSAL", "NR_FACTURA", "CONTRATO", "NR_CUO", "CUOTA", "FCH_VTO",
@@ -133,8 +130,10 @@ describe("sugerirColumnaDeCuota", () => {
   };
 
   it("encuentra la columna de cuota real del cuotero", () => {
-    expect(sugerirColumnaDeCuota(FILAS, HEADERS, MAL)).toMatchObject({
+    expect(sugerirArreglo(FILAS, HEADERS, MAL)).toMatchObject({
+      rol: "invoiceNumber",
       columna: "NR_CUO",
+      antes: 1,
       restantes: 0,
       vacias: 0,
     });
@@ -145,11 +144,11 @@ describe("sugerirColumnaDeCuota", () => {
     const filas = FILAS.map((f, i) => ({ ...f, ID_FILA: `R${i}` }));
 
     // ID_FILA tambien deja todo distinto; gana NR_CUO por su forma.
-    expect(sugerirColumnaDeCuota(filas, headers, MAL)?.columna).toBe("NR_CUO");
+    expect(sugerirArreglo(filas, headers, MAL)?.columna).toBe("NR_CUO");
   });
 
   it("nunca sugiere la columna que ya esta en uso como deudor u operacion", () => {
-    const sugerida = sugerirColumnaDeCuota(FILAS, HEADERS, MAL)?.columna;
+    const sugerida = sugerirArreglo(FILAS, HEADERS, MAL)?.columna;
 
     expect(sugerida).not.toBe("NRO_CLI");
     expect(sugerida).not.toBe("CONTRATO");
@@ -164,10 +163,13 @@ describe("sugerirColumnaDeCuota", () => {
   it("sigue sugiriendo la columna correcta aunque una fila venga sin valor", () => {
     const filas = [
       ...FILAS,
+      ...FILAS.map((f) => ({ ...f, NRO_CLI: "CLI-4" })),
+      ...FILAS.map((f) => ({ ...f, NRO_CLI: "CLI-5" })),
       { NRO_CLI: "CLI-3", SUCURSAL: "Itaugua", NR_FACTURA: "15701-2-3000334", CONTRATO: "3000334", NR_CUO: "", CUOTA: "120,00", FCH_VTO: "2026-10-15" },
+      { NRO_CLI: "CLI-3", SUCURSAL: "Itaugua", NR_FACTURA: "15701-2-3000334", CONTRATO: "3000334", NR_CUO: "2/24", CUOTA: "121,00", FCH_VTO: "2026-11-15" },
     ];
 
-    const s = sugerirColumnaDeCuota(filas, HEADERS, MAL);
+    const s = sugerirArreglo(filas, HEADERS, MAL);
     expect(s?.columna).toBe("NR_CUO");
     expect(s?.vacias).toBe(1);
   });
@@ -177,43 +179,28 @@ describe("sugerirColumnaDeCuota", () => {
     // NR_CUO lo arregla del todo. Igual es la mejor, y se dice cuanto queda.
     const filas = [
       ...FILAS,
+      ...FILAS.map((f) => ({ ...f, NRO_CLI: "CLI-4" })),
       { NRO_CLI: "CLI-1", SUCURSAL: "Encarnacion", NR_FACTURA: "15701-2-3000332", CONTRATO: "3000332", NR_CUO: "13/35", CUOTA: "999,00", FCH_VTO: "2026-11-15" },
     ];
 
-    const s = sugerirColumnaDeCuota(filas, HEADERS, MAL);
+    const s = sugerirArreglo(filas, HEADERS, MAL);
     expect(s?.columna).toBe("NR_CUO");
     expect(s?.restantes).toBe(1);
   });
 
   it("no sugiere nada cuando las filas repetidas son identicas", () => {
     // Se deduplican solas: no hay choque que resolver.
-    expect(sugerirColumnaDeCuota([FILAS[0], { ...FILAS[0] }], HEADERS, MAL)).toBeNull();
+    expect(sugerirArreglo([FILAS[0], { ...FILAS[0] }], HEADERS, MAL)).toBeNull();
   });
 
   it("no sugiere nada si no mejora lo que ya esta mapeado", () => {
     expect(
-      sugerirColumnaDeCuota(FILAS, HEADERS, { ...MAL, invoiceNumber: "NR_CUO" }),
-    ).toBeNull();
-  });
-
-  it("descarta una columna vacia en todas las filas", () => {
-    const headers = ["NRO_CLI", "REF", "MONTO"];
-    const filas = [
-      { NRO_CLI: "CLI-1", REF: "", MONTO: "100" },
-      { NRO_CLI: "CLI-1", REF: "", MONTO: "200" },
-    ];
-
-    expect(
-      sugerirColumnaDeCuota(filas, headers, {
-        externalId: "NRO_CLI",
-        invoiceNumber: "REF",
-        amount: "MONTO",
-      }),
+      sugerirArreglo(FILAS, HEADERS, { ...MAL, invoiceNumber: "NR_CUO" }),
     ).toBeNull();
   });
 
   it("sin deudor mapeado no se puede sugerir nada", () => {
-    expect(sugerirColumnaDeCuota(FILAS, HEADERS, {})).toBeNull();
+    expect(sugerirArreglo(FILAS, HEADERS, {})).toBeNull();
   });
 
   /**
@@ -228,12 +215,88 @@ describe("sugerirColumnaDeCuota", () => {
     ];
 
     // Hay choque —F-1 dos veces con saldos distintos— y SALDO lo resolveria,
-    // pero no es un numero de cuota.
+    // pero no es un numero de cuota ni de credito.
     expect(
-      sugerirColumnaDeCuota(filas, headers, {
+      sugerirArreglo(filas, headers, {
         externalId: "NRO_CLI",
         invoiceNumber: "NR_FACTURA",
         amount: "SALDO",
+      }),
+    ).toBeNull();
+  });
+
+  it("descarta una columna vacia en todo el archivo", () => {
+    const headers = ["NRO_CLI", "NR_FACTURA", "CONTRATO", "SALDO"];
+    const filas = [
+      { NRO_CLI: "CLI-1", NR_FACTURA: "F-1", CONTRATO: "", SALDO: "100" },
+      { NRO_CLI: "CLI-1", NR_FACTURA: "F-1", CONTRATO: "", SALDO: "200" },
+    ];
+
+    expect(
+      sugerirArreglo(filas, headers, {
+        externalId: "NRO_CLI",
+        invoiceNumber: "NR_FACTURA",
+        amount: "SALDO",
+      }),
+    ).toBeNull();
+  });
+
+  /**
+   * El caso real de "Caso 1.xlsx": el mismo deudor compro un T-CROSS y un
+   * POLO TRACK, los dos a 60 cuotas, y los dos van por la cuota 27/60 con el
+   * mismo vencimiento. Las dos deudas son reales. Lo que las separa es
+   * NR_FACTURA, el numero del credito —y "CONTRATO", el alias obvio para la
+   * operacion, viene vacia de punta a punta.
+   *
+   * Lo que falta no es cambiar la cuota: es mapear la operacion.
+   */
+  it("propone mapear la operacion cuando el deudor tiene dos creditos", () => {
+    const headers = ["NRO_CLI", "NR_FACTURA", "CONTRATO", "NR_CUO", "CUOTA", "FCH_VTO"];
+    const filas = [
+      { NRO_CLI: "CLI-PF-796273", NR_FACTURA: "92291-038-001-0000352", CONTRATO: "", NR_CUO: "27/60", CUOTA: "260,00", FCH_VTO: "11/3/26" },
+      { NRO_CLI: "CLI-PF-796273", NR_FACTURA: "92880-038-001-0000356", CONTRATO: "", NR_CUO: "27/60", CUOTA: "180,00", FCH_VTO: "11/3/26" },
+    ];
+
+    expect(
+      sugerirArreglo(filas, headers, {
+        externalId: "NRO_CLI",
+        invoiceNumber: "NR_CUO",
+        amount: "CUOTA",
+        dueDate: "FCH_VTO",
+      }),
+    ).toMatchObject({
+      rol: "loanNumber",
+      columna: "NR_FACTURA",
+      antes: 1,
+      restantes: 0,
+      vacias: 0,
+    });
+  });
+
+  /**
+   * NOMBRE_GARANTE llego a ganar el ranking en el archivo real: resolvia los
+   * choques porque venia vacia en 7.695 filas, no porque identificara nada.
+   * Tomarla como numero de cuota habria descartado casi toda la cartera.
+   */
+  it("nunca gana una columna casi vacia, aunque resuelva los choques", () => {
+    const headers = ["NRO_CLI", "NR_CUO", "NOMBRE_GARANTE", "CUOTA"];
+    const filas: Record<string, string>[] = Array.from({ length: 10 }, (_, i) => ({
+      NRO_CLI: "CLI-1",
+      NR_CUO: `${i + 1}/10`,
+      NOMBRE_GARANTE: "",
+      CUOTA: `${100 + i},00`,
+    }));
+    // Dos choques, y el garante aparece justo en esas dos filas: los arreglaria.
+    filas.push(
+      { NRO_CLI: "CLI-1", NR_CUO: "1/10", NOMBRE_GARANTE: "PEREZ", CUOTA: "999,00" },
+      { NRO_CLI: "CLI-1", NR_CUO: "2/10", NOMBRE_GARANTE: "GOMEZ", CUOTA: "998,00" },
+    );
+
+    expect(
+      sugerirArreglo(filas, headers, {
+        externalId: "NRO_CLI",
+        invoiceNumber: "NR_CUO",
+        amount: "CUOTA",
       }),
     ).toBeNull();
   });

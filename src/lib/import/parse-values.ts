@@ -217,9 +217,12 @@ export function parseCurrency(raw: unknown): ParseResult<string> {
  * - `fecha`     se puede leer como fecha.
  * - `numero`    un entero pelado, sin forma de plata. Un numero de contrato
  *               entra aca, y por eso `numero` NO se descarta como identificador.
+ * - `vacia`     no trae ningun valor. No es "texto": una columna vacia no
+ *               identifica nada y elegirla tapa a la que si sirve.
  * - `texto`     cualquier otra cosa.
  */
 export type ClaseDeColumna =
+  | "vacia"
   | "fraccion"
   | "monto"
   | "montocero"
@@ -238,7 +241,7 @@ export function clasificarColumna(valores: unknown[]): ClaseDeColumna {
     .map((v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).trim()))
     .filter(Boolean);
 
-  if (textos.length === 0) return "texto";
+  if (textos.length === 0) return "vacia";
 
   const todas = (prueba: (t: string) => boolean) => textos.every(prueba);
 

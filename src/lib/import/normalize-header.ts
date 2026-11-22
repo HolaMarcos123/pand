@@ -51,9 +51,7 @@ export function matchHeaders<K extends string>(
       if (used.has(header)) return false;
       if (opciones.compatible && !opciones.compatible(key, header)) return false;
       const normalized = normalizeHeader(header);
-      return list.some(
-        (alias) => normalized === alias || normalized.startsWith(alias),
-      );
+      return list.some((alias) => coincide(normalized, alias));
     });
 
     if (match) {
@@ -63,4 +61,27 @@ export function matchHeaders<K extends string>(
   }
 
   return mapping;
+}
+
+/**
+ * Si un encabezado normalizado corresponde a un alias.
+ *
+ * El prefijo es necesario —"TELEF1" tiene que caer en el alias "telef1" y
+ * "FACTURA_NRO" en "factura"— pero suelto se lleva columnas que no tienen nada
+ * que ver: "CIUDAD" empieza con "ci" y terminaba mapeada a CI/RUC, dejando el
+ * documento real sin asignar. El mismo problema ya habia obligado a sacar el
+ * alias "mon", que se llevaba "MONTO_APLICADO".
+ *
+ * Asi que un prefijo solo vale si corta donde corta una palabra: lo que sigue
+ * es un numero ("telef" + "1"), o el alias es largo y especifico por si mismo.
+ * Para lo demas tiene que coincidir entero.
+ */
+const PREFIJO_SEGURO = 5;
+
+function coincide(normalized: string, alias: string): boolean {
+  if (normalized === alias) return true;
+  if (!normalized.startsWith(alias)) return false;
+
+  const resto = normalized.slice(alias.length);
+  return /^\d/.test(resto) || alias.length >= PREFIJO_SEGURO;
 }
