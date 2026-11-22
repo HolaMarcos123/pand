@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { detectarCuotaRepetida, sugerirArreglo } from "@/lib/import/duplicados";
+import { apartarRepetidas, sugerirArreglo } from "@/lib/import/duplicados";
 import type { MappedRow } from "@/lib/import/row-schema";
+import type { ValidationOutcome } from "@/lib/import/validate-rows";
 
 /**
  * El caso real que motiva todo esto: un cuotero trae "NR_FACTURA" con
  * "15701-2-3000332" —el numero del credito, igual en las 35 cuotas— y "NR_CUO"
  * con "13/35", que es la cuota de verdad. Mapear la primera hace que las 35
- * filas digan ser la misma deuda, y la carga se corta despues de crear la
- * cartera, con un mensaje que adivina la causa.
+ * filas digan ser la misma deuda.
  */
 
 function fila(extra: Partial<MappedRow> = {}): MappedRow {
@@ -22,90 +22,160 @@ function fila(extra: Partial<MappedRow> = {}): MappedRow {
   } as MappedRow;
 }
 
-describe("detectarCuotaRepetida", () => {
-  it("no reporta nada cuando cada cuota es distinta", () => {
-    const filas = [
-      fila({ invoiceNumber: "13/35", amount: 375_000 }),
-      fila({ invoiceNumber: "14/35", amount: 380_000 }),
-    ];
+/** Lo que devuelve `validateRows`, para poder apartarle las repetidas. */
+function validado(filas: MappedRow[], numeros?: number[]): ValidationOutcome {
+  return {
+    valid: filas,
+    // +2: la fila 1 son los encabezados y los humanos cuentan desde 1.
+    numeros: numeros ?? filas.map((_, i) => i + 2),
+    errors: [],
+    avisos: [],
+  };
+}
 
-    expect(detectarCuotaRepetida(filas)).toBeNull();
+describe("apartarRepetidas", () => {
+  it("no aparta nada cuando cada cuota es distinta", () => {
+    const r = apartarRepetidas(
+      validado([
+        fila({ invoiceNumber: "13/35", amount: 375_000 }),
+        fila({ invoiceNumber: "14/35", amount: 380_000 }),
+      ]),
+    );
+
+    expect(r.repetidas).toBeNull();
+    expect(r.valid).toHaveLength(2);
+    expect(r.errors).toHaveLength(0);
   });
 
-  it("tolera la fila repetida identica: se deduplica, no es un choque", () => {
-    expect(detectarCuotaRepetida([fila(), fila()])).toBeNull();
+  it("la fila repetida identica se deduplica sin avisar", () => {
+    const r = apartarRepetidas(validado([fila(), fila()]));
+
+    expect(r.repetidas).toBeNull();
+    expect(r.valid).toHaveLength(1);
+    expect(r.errors).toHaveLength(0);
   });
 
-  it("detecta dos deudas distintas bajo el mismo numero de cuota", () => {
-    const filas = [
-      fila({ invoiceNumber: "15701-2-3000332", amount: 375_000 }),
-      fila({ invoiceNumber: "15701-2-3000332", amount: 412_000 }),
-    ];
+  /**
+   * Lo importante: entra la primera y se saltea la segunda. Antes esto frenaba
+   * la carga entera, y en una cartera real de 7.800 filas siempre hay un par
+   * ambiguas: exigir cero era exigir que no se importe nada.
+   */
+  it("deja entrar la primera y saltea la segunda, reportandola", () => {
+    const r = apartarRepetidas(
+      validado([
+        fila({ invoiceNumber: "15701-2-3000332", amount: 375_000 }),
+        fila({ invoiceNumber: "15701-2-3000332", amount: 412_000 }),
+      ]),
+    );
 
-    expect(detectarCuotaRepetida(filas)).toMatchObject({
+    expect(r.valid).toHaveLength(1);
+    expect(r.valid[0].amount).toBe(375_000);
+    expect(r.repetidas).toMatchObject({
       externalId: "CLI-PF-1956960",
       invoiceNumber: "15701-2-3000332",
       total: 1,
+      filas: [2, 3],
     });
+    expect(r.errors).toEqual([
+      {
+        row: 3,
+        field: "Deuda repetida",
+        message: "la misma cuota ya vino en la fila 2 con otro monto o vencimiento",
+      },
+    ]);
   });
 
-  it("reporta las filas como las numera Excel, con el encabezado contado", () => {
-    const filas = [
-      fila({ invoiceNumber: "A", amount: 1 }),
-      fila({ invoiceNumber: "B", amount: 2 }),
-      fila({ invoiceNumber: "A", amount: 999 }),
-    ];
+  it("cuenta todas las salteadas pero describe solo la primera", () => {
+    const r = apartarRepetidas(
+      validado([
+        fila({ invoiceNumber: "A", amount: 1 }),
+        fila({ invoiceNumber: "A", amount: 2 }),
+        fila({ invoiceNumber: "B", amount: 3 }),
+        fila({ invoiceNumber: "B", amount: 4 }),
+      ]),
+    );
 
-    expect(detectarCuotaRepetida(filas)?.filas).toEqual([2, 4]);
+    expect(r.repetidas?.invoiceNumber).toBe("A");
+    expect(r.repetidas?.total).toBe(2);
+    expect(r.valid).toHaveLength(2);
+    expect(r.errors).toHaveLength(2);
   });
 
-  it("cuenta todas las colisiones pero reporta solo la primera", () => {
-    const filas = [
-      fila({ invoiceNumber: "A", amount: 1 }),
-      fila({ invoiceNumber: "A", amount: 2 }),
-      fila({ invoiceNumber: "B", amount: 3 }),
-      fila({ invoiceNumber: "B", amount: 4 }),
-    ];
+  /**
+   * Los numeros vienen de `validateRows` y no de la posicion dentro de `valid`:
+   * si la validacion descarto filas del medio, contar sobre `valid` daba un
+   * numero que no existe en la planilla que la persona tiene abierta.
+   */
+  it("reporta el numero de fila de la planilla, no la posicion en la lista", () => {
+    const r = apartarRepetidas(
+      validado(
+        [
+          fila({ invoiceNumber: "A", amount: 1 }),
+          fila({ invoiceNumber: "A", amount: 2 }),
+        ],
+        [4982, 4992],
+      ),
+    );
 
-    const r = detectarCuotaRepetida(filas);
-    expect(r?.invoiceNumber).toBe("A");
-    expect(r?.total).toBe(2);
+    expect(r.repetidas?.filas).toEqual([4982, 4992]);
+    expect(r.errors[0].row).toBe(4992);
   });
 
   it("la operacion separa dos creditos con la misma cuota", () => {
-    const filas = [
-      fila({ loanNumber: "3000332", invoiceNumber: "1/35", amount: 375_000 }),
-      fila({ loanNumber: "3000999", invoiceNumber: "1/35", amount: 412_000 }),
-    ];
+    const r = apartarRepetidas(
+      validado([
+        fila({ loanNumber: "3000332", invoiceNumber: "1/35", amount: 375_000 }),
+        fila({ loanNumber: "3000999", invoiceNumber: "1/35", amount: 412_000 }),
+      ]),
+    );
 
-    expect(detectarCuotaRepetida(filas)).toBeNull();
+    expect(r.repetidas).toBeNull();
+    expect(r.valid).toHaveLength(2);
   });
 
   it("sin operacion mapeada, dos creditos del mismo deudor chocan", () => {
-    const filas = [
-      fila({ invoiceNumber: "1/35", amount: 375_000 }),
-      fila({ invoiceNumber: "1/35", amount: 412_000 }),
-    ];
+    const r = apartarRepetidas(
+      validado([
+        fila({ invoiceNumber: "1/35", amount: 375_000 }),
+        fila({ invoiceNumber: "1/35", amount: 412_000 }),
+      ]),
+    );
 
-    expect(detectarCuotaRepetida(filas)?.total).toBe(1);
+    expect(r.repetidas?.total).toBe(1);
   });
 
   it("dos deudores pueden tener la misma cuota: no es un choque", () => {
-    const filas = [
-      fila({ externalId: "CLI-1", invoiceNumber: "1/60", amount: 100 }),
-      fila({ externalId: "CLI-2", invoiceNumber: "1/60", amount: 200 }),
-    ];
+    const r = apartarRepetidas(
+      validado([
+        fila({ externalId: "CLI-1", invoiceNumber: "1/60", amount: 100 }),
+        fila({ externalId: "CLI-2", invoiceNumber: "1/60", amount: 200 }),
+      ]),
+    );
 
-    expect(detectarCuotaRepetida(filas)).toBeNull();
+    expect(r.repetidas).toBeNull();
+    expect(r.valid).toHaveLength(2);
   });
 
   it("la moneda distingue dos deudas con la misma cifra", () => {
-    const filas = [
-      fila({ invoiceNumber: "1/35", amount: 500, currency: "PYG" }),
-      fila({ invoiceNumber: "1/35", amount: 500, currency: "USD" }),
-    ];
+    const r = apartarRepetidas(
+      validado([
+        fila({ invoiceNumber: "1/35", amount: 500, currency: "PYG" }),
+        fila({ invoiceNumber: "1/35", amount: 500, currency: "USD" }),
+      ]),
+    );
 
-    expect(detectarCuotaRepetida(filas)?.total).toBe(1);
+    expect(r.repetidas?.total).toBe(1);
+  });
+
+  it("conserva los errores y avisos que ya traia la validacion", () => {
+    const base = validado([fila()]);
+    base.errors.push({ row: 9, field: "Monto", message: "vacío" });
+    base.avisos.push({ field: "Telef3", count: 175, ejemplo: "0985-925618" });
+
+    const r = apartarRepetidas(base);
+
+    expect(r.errors).toHaveLength(1);
+    expect(r.avisos).toHaveLength(1);
   });
 });
 
@@ -299,5 +369,62 @@ describe("sugerirArreglo", () => {
         amount: "CUOTA",
       }),
     ).toBeNull();
+  });
+  /**
+   * El caso del "Cuotero DIESA": "CONTRATO" matchea el alias de "Nro. de
+   * operacion" pero viene vacia en 3.474 de 7.803 filas, asi que los dos
+   * creditos de un mismo deudor quedan los dos sin operacion y chocan. La
+   * columna que si los separa es "NR_FACTURA", y no se llegaba a probar porque
+   * el puesto ya estaba ocupado: la pantalla decia "ninguna columna mejora
+   * esto" teniendo la correcta al lado.
+   */
+  it("propone cambiar la operacion aunque ya este mapeada a otra columna", () => {
+    const headers = ["NRO_CLI", "NR_FACTURA", "CONTRATO", "NR_CUO", "CUOTA", "FCH_VTO"];
+    const filas = [
+      // Dos creditos del mismo deudor, los dos sin CONTRATO: con esa columna
+      // como operacion, las dos cuotas 1/60 dicen ser la misma deuda.
+      { NRO_CLI: "CLI-1", NR_FACTURA: "F-100", CONTRATO: "", NR_CUO: "1/60", CUOTA: "260,00", FCH_VTO: "2026-11-03" },
+      { NRO_CLI: "CLI-1", NR_FACTURA: "F-100", CONTRATO: "", NR_CUO: "2/60", CUOTA: "260,00", FCH_VTO: "2026-12-03" },
+      { NRO_CLI: "CLI-1", NR_FACTURA: "F-200", CONTRATO: "", NR_CUO: "1/60", CUOTA: "180,00", FCH_VTO: "2026-11-03" },
+      { NRO_CLI: "CLI-1", NR_FACTURA: "F-200", CONTRATO: "", NR_CUO: "2/60", CUOTA: "180,00", FCH_VTO: "2026-12-03" },
+      // Otro deudor donde CONTRATO si viene: la columna no esta vacia entera.
+      { NRO_CLI: "CLI-2", NR_FACTURA: "F-300", CONTRATO: "26775", NR_CUO: "1/60", CUOTA: "500,00", FCH_VTO: "2026-11-03" },
+    ];
+
+    expect(
+      sugerirArreglo(filas, headers, {
+        externalId: "NRO_CLI",
+        loanNumber: "CONTRATO",
+        invoiceNumber: "NR_CUO",
+        amount: "CUOTA",
+        dueDate: "FCH_VTO",
+      }),
+    ).toMatchObject({
+      rol: "loanNumber",
+      columna: "NR_FACTURA",
+      antes: 2,
+      restantes: 0,
+    });
+  });
+
+  /**
+   * Cualquier columna con un valor distinto por fila "arregla" los choques
+   * usada como operacion: dice que cada fila es un credito aparte. Es cierto y
+   * es inutil. La forma "13/35" gana ante la misma mejora.
+   */
+  it("prefiere la cuota con forma 13/35 antes que un id unico por fila", () => {
+    const headers = ["NRO_CLI", "NR_FACTURA", "NR_CUO", "ID_FILA", "CUOTA"];
+    const filas = [
+      { NRO_CLI: "CLI-1", NR_FACTURA: "F-100", NR_CUO: "1/60", ID_FILA: "R1", CUOTA: "260,00" },
+      { NRO_CLI: "CLI-1", NR_FACTURA: "F-100", NR_CUO: "2/60", ID_FILA: "R2", CUOTA: "270,00" },
+    ];
+
+    expect(
+      sugerirArreglo(filas, headers, {
+        externalId: "NRO_CLI",
+        invoiceNumber: "NR_FACTURA",
+        amount: "CUOTA",
+      }),
+    ).toMatchObject({ rol: "invoiceNumber", columna: "NR_CUO" });
   });
 });

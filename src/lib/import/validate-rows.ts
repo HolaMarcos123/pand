@@ -25,6 +25,15 @@ export type Aviso = {
 
 export type ValidationOutcome = {
   valid: MappedRow[];
+  /**
+   * El numero de fila de Excel de cada entrada de `valid`, en el mismo orden.
+   *
+   * Va aparte porque `MappedRow` es lo que viaja al servidor y no tiene por que
+   * cargar con esto. Hace falta para poder decir "filas 4982 y 4992" despues de
+   * que la validacion descarto filas del medio: sin esto se contaba sobre
+   * `valid` y el numero no era el que la persona ve en la planilla.
+   */
+  numeros: number[];
   errors: RowError[];
   avisos: Aviso[];
 };
@@ -50,6 +59,7 @@ export function validateRows(
   fields: FieldDef[],
 ): ValidationOutcome {
   const valid: MappedRow[] = [];
+  const numeros: number[] = [];
   const errors: RowError[] = [];
   const avisos = new Map<string, Aviso>();
 
@@ -166,10 +176,13 @@ export function validateRows(
 
     if (Object.keys(propios).length > 0) built.custom = propios;
 
-    if (!failed) valid.push(built as MappedRow);
+    if (!failed) {
+      valid.push(built as MappedRow);
+      numeros.push(rowNumber);
+    }
   });
 
-  return { valid, errors, avisos: [...avisos.values()] };
+  return { valid, numeros, errors, avisos: [...avisos.values()] };
 }
 
 /** CSV de errores para descargar, con BOM para que Excel respete los acentos. */

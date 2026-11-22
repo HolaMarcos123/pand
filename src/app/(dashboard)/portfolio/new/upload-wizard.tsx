@@ -48,7 +48,7 @@ import {
 } from "@/lib/import/actions";
 import { etiquetaDesdeEncabezado, tipoDesdeMuestra } from "@/lib/import/campo-nuevo";
 import {
-  detectarCuotaRepetida,
+  apartarRepetidas,
   sugerirArreglo,
 } from "@/lib/import/duplicados";
 import { readSpreadsheet, type SheetData } from "@/lib/import/read-file";
@@ -156,24 +156,23 @@ export function UploadWizard({
 
   // Se revalida en cada cambio de mapeo: el usuario ve el impacto al instante en vez
   // de descubrir 4.000 errores recién al final.
+  /**
+   * Las filas listas para escribir, ya sin las que dicen ser una deuda que otra
+   * fila ya trajo.
+   *
+   * Las repetidas se apartan acá y no al escribir porque acá se pueden
+   * arreglar: la persona está mirando el mapeo que las causó. El chequeo del
+   * servidor queda igual, de última línea.
+   */
   const validation = useMemo(
-    () => (sheet ? validateRows(sheet.rows, mapping, fields) : null),
+    () =>
+      sheet ? apartarRepetidas(validateRows(sheet.rows, mapping, fields)) : null,
     [sheet, mapping, fields],
   );
 
   const missingRequired = fields.filter((f) => f.required && !mapping[f.key]);
 
-  /**
-   * Dos filas que dicen ser la misma cuota del mismo crédito.
-   *
-   * Se detecta acá y no al escribir porque acá se puede arreglar: la persona
-   * está mirando el mapeo que lo causó. El servidor lo sigue rechazando, pero
-   * para entonces la cartera ya se creó y el mensaje tiene que adivinar.
-   */
-  const repetida = useMemo(
-    () => (validation ? detectarCuotaRepetida(validation.valid) : null),
-    [validation],
-  );
+  const repetida = validation?.repetidas ?? null;
 
   /**
    * Qué columna distinguiría las deudas. Solo se busca si hay choque.
@@ -679,9 +678,9 @@ export function UploadWizard({
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-pand-coral" />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-pand-contorno">
-                    Hay {formatNumber(repetida.total)}{" "}
-                    {repetida.total === 1 ? "deuda que no se distingue" : "deudas que no se distinguen"}{" "}
-                    entre sí
+                    Se van a saltear {formatNumber(repetida.total)}{" "}
+                    {repetida.total === 1 ? "fila" : "filas"} que no se
+                    {repetida.total === 1 ? " distingue" : " distinguen"} de otra
                   </p>
                   <p className="mt-1 text-xs text-pand-gris">
                     El deudor <span className="mono">{repetida.externalId}</span>{" "}
@@ -696,30 +695,44 @@ export function UploadWizard({
                     ) : (
                       " sin número de operación"
                     )}
-                    , con deudas distintas (filas{" "}
+                    , con montos o vencimientos distintos (filas{" "}
                     <span className="mono">{repetida.filas[0]}</span> y{" "}
-                    <span className="mono">{repetida.filas[1]}</span>). Con este
-                    mapeo las dos entrarían como una sola.
+                    <span className="mono">{repetida.filas[1]}</span>). Entra la
+                    primera; dejar entrar las dos haría que una pise a la otra.
                   </p>
 
                   {sugerida ? (
                     <>
                       {sugerida.rol === "loanNumber" ? (
                         <p className="mt-2 text-xs text-pand-gris">
-                          Falta mapear{" "}
-                          <strong className="font-semibold text-pand-contorno">
-                            «{etiquetaDelArreglo}»
-                          </strong>
-                          : la columna{" "}
-                          <strong className="font-semibold text-pand-contorno">
-                            {sugerida.columna}
-                          </strong>{" "}
-                          separa los créditos de un mismo deudor
-                          {sugerida.restantes === 0 ? (
-                            <>, y con ella no queda ninguna sin distinguir</>
+                          {colOperacion ? (
+                            <>
+                              La columna{" "}
+                              <strong className="font-semibold text-pand-contorno">
+                                {sugerida.columna}
+                              </strong>{" "}
+                              separa mejor los créditos que{" "}
+                              <span className="mono">{colOperacion}</span>
+                            </>
                           ) : (
                             <>
-                              , y bajarían de {formatNumber(sugerida.antes)} a{" "}
+                              Falta mapear{" "}
+                              <strong className="font-semibold text-pand-contorno">
+                                «{etiquetaDelArreglo}»
+                              </strong>
+                              : la columna{" "}
+                              <strong className="font-semibold text-pand-contorno">
+                                {sugerida.columna}
+                              </strong>{" "}
+                              separa los créditos de un mismo deudor
+                            </>
+                          )}
+                          {sugerida.restantes === 0 ? (
+                            <>, y con ella no se saltea ninguna</>
+                          ) : (
+                            <>
+                              , y las salteadas bajan de{" "}
+                              {formatNumber(sugerida.antes)} a{" "}
                               {formatNumber(sugerida.restantes)}
                             </>
                           )}
@@ -745,10 +758,9 @@ export function UploadWizard({
                               <strong className="font-semibold text-pand-contorno">
                                 {sugerida.columna}
                               </strong>
-                              : bajaría de {formatNumber(sugerida.antes)} a{" "}
-                              {formatNumber(sugerida.restantes)}. Si queda
-                              alguna, suele faltar mapear «Nro. de operación»,
-                              que separa los créditos de un mismo deudor.
+                              : las salteadas bajan de{" "}
+                              {formatNumber(sugerida.antes)} a{" "}
+                              {formatNumber(sugerida.restantes)}.
                             </>
                           )}
                         </p>
@@ -780,9 +792,11 @@ export function UploadWizard({
                   ) : (
                     <p className="mt-2 text-xs text-pand-gris">
                       Ninguna columna del archivo mejora esto por sí sola. Si el
-                      deudor tiene varios créditos, mapeá «Nro. de operación»:
-                      es la que los separa. Y revisá que «Nro. de cuota» apunte
-                      al identificador de la cuota y no al del crédito.
+                      deudor tiene varios créditos, revisá que «Nro. de
+                      operación» apunte a la columna que los separa, y que «Nro.
+                      de cuota» sea el identificador de la cuota y no el del
+                      crédito. Si son pocas, podés seguir: se saltean y quedan
+                      en el detalle de filas con error.
                     </p>
                   )}
                 </div>
@@ -810,7 +824,7 @@ export function UploadWizard({
             </Button>
             <Button
               onClick={() => setStep(2)}
-              disabled={missingRequired.length > 0 || repetida !== null}
+              disabled={missingRequired.length > 0}
             >
               Continuar
             </Button>

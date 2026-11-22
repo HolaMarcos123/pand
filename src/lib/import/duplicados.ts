@@ -1,6 +1,7 @@
 import type { ClaseDeColumna } from "@/lib/import/parse-values";
 import { clasificarColumnas } from "@/lib/import/sector-config";
 import type { MappedRow } from "@/lib/import/row-schema";
+import type { ValidationOutcome } from "@/lib/import/validate-rows";
 
 /**
  * Dos filas de la planilla que dicen ser la misma cuota del mismo credito.
@@ -48,42 +49,74 @@ export type CuotaRepetida = {
   invoiceNumber: string;
   /** Numeros de fila como los ve la persona en Excel. */
   filas: [number, number];
-  /** Cuantas colisiones hay en toda la planilla, no solo esta. */
+  /** Cuantas filas se saltean en toda la planilla, no solo esta. */
   total: number;
 };
 
 /**
- * La primera cuota repetida con deudas distintas, y cuantas hay en total.
+ * Saca de la carga las filas que dicen ser una deuda que ya vino, y cuenta
+ * cuantas son.
  *
- * Devuelve `null` cuando la planilla esta bien: repetir la MISMA fila no es un
- * problema —se deduplica— y es comun en planillas exportadas de un ERP.
+ * Antes esto frenaba la carga entera: con una sola cuota ambigua la persona no
+ * podia importar nada. En una cartera real de 7.800 filas siempre hay un par
+ * —el caso que lo mostro son dos lineas del mismo credito, la entrega inicial y
+ * un avance, que el ERP exporta las dos como cuota "1/1"—, asi que exigir cero
+ * ambiguedad es exigir que no se importe.
+ *
+ * Ahora la fila ambigua se saltea y se reporta como cualquier otra fila que no
+ * entra. Lo que no se hace nunca es dejarlas entrar a las dos: se pisarian en
+ * la base y la deuda que quedaria seria la ultima, en silencio.
+ *
+ * Repetir la MISMA fila no es ambiguo —se deduplica— y es comun en planillas
+ * exportadas de un ERP.
  */
-export function detectarCuotaRepetida(rows: MappedRow[]): CuotaRepetida | null {
+export function apartarRepetidas(outcome: ValidationOutcome): ValidationOutcome & {
+  repetidas: CuotaRepetida | null;
+} {
   const vistas = new Map<string, { row: MappedRow; fila: number }>();
+  const valid: MappedRow[] = [];
+  const numeros: number[] = [];
+  const errors = [...outcome.errors];
   let primera: Omit<CuotaRepetida, "total"> | undefined;
   let total = 0;
 
-  for (let index = 0; index < rows.length; index += 1) {
-    const row = rows[index];
+  for (let index = 0; index < outcome.valid.length; index += 1) {
+    const row = outcome.valid[index];
+    const fila = outcome.numeros[index];
     const clave = claveDeDeuda(row);
     const previa = vistas.get(clave);
 
-    if (previa && !mismaDeuda(previa.row, row)) {
+    if (previa) {
+      // La misma fila dos veces no es un problema: se deduplica y no se avisa.
+      if (mismaDeuda(previa.row, row)) continue;
+
       total += 1;
       primera ??= {
         externalId: row.externalId,
         loanNumber: row.loanNumber ?? null,
         invoiceNumber: row.invoiceNumber,
-        // +2: la fila 1 son los encabezados y los humanos cuentan desde 1.
-        filas: [previa.fila + 2, index + 2],
+        filas: [previa.fila, fila],
       };
+      errors.push({
+        row: fila,
+        field: "Deuda repetida",
+        message: `la misma cuota ya vino en la fila ${previa.fila} con otro monto o vencimiento`,
+      });
       continue;
     }
 
-    vistas.set(clave, { row, fila: index });
+    vistas.set(clave, { row, fila });
+    valid.push(row);
+    numeros.push(fila);
   }
 
-  return primera ? { ...primera, total } : null;
+  return {
+    valid,
+    numeros,
+    errors,
+    avisos: outcome.avisos,
+    repetidas: primera ? { ...primera, total } : null,
+  };
 }
 
 /** Las columnas del archivo que arman la identidad de una deuda. */
@@ -268,11 +301,13 @@ export function sugerirArreglo(
 
   const clase = clasificarColumnas(headers, filas);
 
-  // La operacion solo se propone si esta libre: si ya esta mapeada, cambiarla
-  // es decision de la persona y no de un ranking.
-  const roles: RolDeIdentidad[] = columnas.loanNumber
-    ? ["invoiceNumber"]
-    : ["loanNumber", "invoiceNumber"];
+  // Los dos roles se prueban siempre, tambien cuando la operacion ya esta
+  // mapeada. No proponer cambiarla fue el error que dejo la pantalla sin salida
+  // en la cartera real: "CONTRATO" matchea el alias de "Nro. de operacion" pero
+  // viene vacia en 3.474 de 7.803 filas, y con ella quedaban 64 deudas sin
+  // distinguir. La columna que si separa los creditos, "NR_FACTURA", nunca se
+  // llegaba a probar porque el puesto ya estaba ocupado.
+  const roles: RolDeIdentidad[] = ["loanNumber", "invoiceNumber"];
 
   const puntuadas = [];
 
@@ -327,8 +362,14 @@ export function sugerirArreglo(
   puntuadas.sort(
     (a, b) =>
       a.costo - b.costo ||
-      Number(b.rol === "loanNumber") - Number(a.rol === "loanNumber") ||
+      // La forma "13/35" va primero a proposito. Ante la misma mejora, una
+      // columna con esa forma ES el numero de cuota; en cambio cualquier
+      // columna con un valor distinto por fila —un id de linea, un numero de
+      // recibo— tambien "arregla" los choques usada como operacion, diciendo
+      // que cada fila es un credito aparte. Eso es cierto y es inutil.
       Number(b.esCuotaObvia) - Number(a.esCuotaObvia) ||
+      // Entre las que quedan gana mapear la operacion, que no descarta filas.
+      Number(b.rol === "loanNumber") - Number(a.rol === "loanNumber") ||
       a.orden - b.orden,
   );
 
