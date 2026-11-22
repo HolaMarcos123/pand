@@ -40,6 +40,7 @@ import { agregarCampoPropio } from "@/lib/config/actions";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import {
   createPortfolio,
+  discardPortfolio,
   finalizePortfolio,
   importBatch,
   saveColumnMapping,
@@ -295,6 +296,23 @@ export function UploadWizard({
     const rows = validation.valid;
     setProgress({ done: 0, total: rows.length });
 
+    /**
+     * Deshace la carga que no llegó a terminar.
+     *
+     * La cartera se crea antes de la primera fila, así que sin esto cada
+     * intento fallido deja una cartera vacía colgada en la lista. Que falle el
+     * descarte no se le muestra a la persona: ya está viendo el error que
+     * importa, y este es trabajo de limpieza.
+     */
+    const descartar = async () => {
+      try {
+        await discardPortfolio(created.portfolioId);
+      } catch {
+        // No hay nada que la persona pueda hacer con esto.
+      }
+      setProgress(null);
+    };
+
     try {
       for (let i = 0; i < rows.length; i += BATCH_SIZE) {
         const batch = rows.slice(i, i + BATCH_SIZE);
@@ -305,7 +323,7 @@ export function UploadWizard({
 
         if (!result.ok) {
           toast.error(result.error);
-          setProgress(null);
+          await descartar();
           return;
         }
 
@@ -322,7 +340,7 @@ export function UploadWizard({
       const done = await finalizePortfolio(created.portfolioId);
       if (!done.ok) {
         toast.error(done.error);
-        setProgress(null);
+        await descartar();
         return;
       }
 
@@ -332,8 +350,8 @@ export function UploadWizard({
       router.push("/portfolio");
       router.refresh();
     } catch {
-      toast.error("Se cortó la importación. La cartera quedó a medio cargar.");
-      setProgress(null);
+      toast.error("Se cortó la importación. No se escribió nada: probá de nuevo.");
+      await descartar();
     }
   }
 

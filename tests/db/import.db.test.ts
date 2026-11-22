@@ -42,7 +42,9 @@ vi.mock("@/lib/auth/session", () => ({
 // existe. No es parte de lo que se prueba acá.
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 
-const { importBatch, finalizePortfolio } = await import("@/lib/import/actions");
+const { importBatch, finalizePortfolio, discardPortfolio } = await import(
+  "@/lib/import/actions",
+);
 
 function sesionDe(ctx: Contexto, role: "ADMIN" | "OPERATOR" = "ADMIN"): SessionData {
   // Los settings salen del resolvedor de verdad en vez de escribirse a mano: si
@@ -1040,5 +1042,123 @@ describe("cierre de la carga", () => {
       select: { totalDebt: true },
     });
     expect(Number(deudor?.totalDebt)).toBe(1_000_000);
+  });
+});
+
+/**
+ * La cartera se crea antes de escribir la primera fila, asi que una carga que
+ * se corta —un mapeo mal armado, la conexion— deja una cartera vacia colgada.
+ * Paso de verdad: dos intentos fallidos dejaron dos carteras en UPLOADING, con
+ * cero deudores, y nadie podia borrarlas porque no hay borrado en la UI.
+ */
+describe("discardPortfolio — deshacer una carga que no termino", () => {
+  it("borra la cartera vacia de un intento que nunca escribio nada", async () => {
+    const vacia = await prisma.portfolio.create({
+      data: { organizationId: ctx.organizationId, name: "Intento fallido" },
+      select: { id: true },
+    });
+
+    await discardPortfolio(vacia.id);
+
+    expect(
+      await prisma.portfolio.findUnique({ where: { id: vacia.id } }),
+    ).toBeNull();
+  });
+
+  it("se lleva los deudores y comprobantes que alcanzo a escribir", async () => {
+    const aMedias = await prisma.portfolio.create({
+      data: { organizationId: ctx.organizationId, name: "A medias" },
+      select: { id: true },
+    });
+    await importBatch({
+      portfolioId: aMedias.id,
+      rows: [fila({ externalId: "X-1", invoiceNumber: "F-9" })],
+    });
+
+    await discardPortfolio(aMedias.id);
+
+    // Si solo se borrara la cartera, el deudor quedaria suelto en la
+    // organizacion: la relacion es onDelete SetNull, no Cascade.
+    expect(
+      await prisma.client.count({
+        where: { organizationId: ctx.organizationId, externalId: "X-1" },
+      }),
+    ).toBe(0);
+    expect(
+      await prisma.invoice.count({ where: { portfolioId: aMedias.id } }),
+    ).toBe(0);
+    expect(
+      await prisma.client.count({
+        where: { organizationId: ctx.organizationId, portfolioId: null },
+      }),
+    ).toBe(0);
+  });
+
+  it("no toca un deudor que ya venia de otra cartera", async () => {
+    // El upsert de importBatch no pisa el portfolio_id de un deudor que ya
+    // existe. Gracias a eso, borrar por portfolio_id solo se lleva lo que
+    // nacio en esta carga — y este es el test que lo fija.
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [fila({ externalId: "C-VIEJO", invoiceNumber: "F-1" })],
+    });
+    await finalizePortfolio(ctx.portfolioId);
+
+    const segunda = await prisma.portfolio.create({
+      data: { organizationId: ctx.organizationId, name: "Segunda carga" },
+      select: { id: true },
+    });
+    await importBatch({
+      portfolioId: segunda.id,
+      rows: [fila({ externalId: "C-VIEJO", invoiceNumber: "F-2" })],
+    });
+
+    await discardPortfolio(segunda.id);
+
+    const deudor = await prisma.client.findFirst({
+      where: { organizationId: ctx.organizationId, externalId: "C-VIEJO" },
+      select: { portfolioId: true },
+    });
+    expect(deudor?.portfolioId).toBe(ctx.portfolioId);
+    // El comprobante de la carga descartada si se va; el original queda.
+    expect(
+      await prisma.invoice.count({ where: { portfolioId: ctx.portfolioId } }),
+    ).toBe(1);
+    expect(
+      await prisma.invoice.count({ where: { portfolioId: segunda.id } }),
+    ).toBe(0);
+  });
+
+  it("no borra una cartera ya activa", async () => {
+    await importBatch({
+      portfolioId: ctx.portfolioId,
+      rows: [fila({ externalId: "C-1", invoiceNumber: "F-1" })],
+    });
+    await finalizePortfolio(ctx.portfolioId);
+
+    await discardPortfolio(ctx.portfolioId);
+
+    expect(
+      await prisma.portfolio.findUnique({ where: { id: ctx.portfolioId } }),
+    ).not.toBeNull();
+  });
+
+  it("no borra una cartera de otra organizacion", async () => {
+    const otra = await crearOrganizacion("descarte-ajeno");
+    try {
+      const ajena = await prisma.portfolio.create({
+        data: { organizationId: otra.organizationId, name: "Ajena" },
+        select: { id: true },
+      });
+
+      // La sesion sigue siendo la de `ctx`: no deberia alcanzar.
+      await discardPortfolio(ajena.id);
+
+      expect(
+        await prisma.portfolio.findUnique({ where: { id: ajena.id } }),
+      ).not.toBeNull();
+    } finally {
+      await borrarOrganizacion(otra.organizationId);
+    }
   });
 });

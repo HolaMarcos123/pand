@@ -539,17 +539,43 @@ export async function saveColumnMapping(input: {
   });
 }
 
-/** Descarta una carga a medio hacer. */
+/**
+ * Descarta una carga a medio hacer, con lo que haya alcanzado a escribir.
+ *
+ * La cartera se crea antes de la primera fila, asi que una carga que se corta
+ * —por un mapeo mal armado, por la conexion— deja una cartera vacia colgada.
+ * Juntar una por cada intento fallido convierte la lista en un cementerio.
+ *
+ * Borra tambien los deudores y comprobantes de esa carga, y no solo la fila de
+ * la cartera: las relaciones son `onDelete: SetNull`, asi que borrarla sola
+ * dejaria los deudores sueltos en la organizacion, sin cartera y sin que nadie
+ * los vea.
+ *
+ * Que se borre por `portfolio_id` es lo que lo hace seguro. Un deudor que ya
+ * existia de otra cartera conserva el suyo —el upsert de `importBatch` no lo
+ * pisa a proposito—, asi que no entra en este borrado. Solo se van los que
+ * nacieron de esta carga, y los comprobantes que esta carga escribio.
+ */
 export async function discardPortfolio(portfolioId: string): Promise<void> {
   const session = await requireSession();
 
-  await prisma.portfolio.deleteMany({
+  // Solo se puede descartar lo que todavia no quedo activo, y de la propia
+  // organizacion. Se chequea antes de tocar nada: los borrados de abajo van
+  // por `portfolio_id`, que no alcanza por si solo para acotar el inquilino.
+  const portfolio = await prisma.portfolio.findFirst({
     where: {
       id: portfolioId,
       organizationId: session.organization.id,
-      // Solo se puede descartar lo que todavía no quedó activo.
       status: { in: ["UPLOADING", "PROCESSING"] },
     },
+    select: { id: true },
+  });
+  if (!portfolio) return;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.invoice.deleteMany({ where: { portfolioId } });
+    await tx.client.deleteMany({ where: { portfolioId } });
+    await tx.portfolio.deleteMany({ where: { id: portfolioId } });
   });
 
   revalidatePath("/portfolio");
