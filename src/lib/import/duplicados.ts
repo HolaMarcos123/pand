@@ -85,59 +85,152 @@ export function detectarCuotaRepetida(rows: MappedRow[]): CuotaRepetida | null {
   return primera ? { ...primera, total } : null;
 }
 
+/** Las columnas del archivo que arman la identidad de una deuda. */
+export type ColumnasDeIdentidad = {
+  externalId?: string;
+  loanNumber?: string;
+  invoiceNumber?: string;
+  amount?: string;
+  dueDate?: string;
+  currency?: string;
+};
+
+export type SugerenciaDeCuota = {
+  columna: string;
+  /** Choques que quedarian usando esta columna. 0 es resolverlo del todo. */
+  restantes: number;
+  /** Filas sin valor ahi. El numero de cuota es obligatorio, asi que molestan. */
+  vacias: number;
+};
+
+const texto = (valor: unknown) =>
+  valor === null || valor === undefined ? "" : String(valor).trim();
+
 /**
- * Que columna del archivo serviria como "Nro. de cuota" sin repetir deudas.
+ * Cuantas deudas quedarian repetidas si esta columna fuera el "Nro. de cuota".
+ *
+ * Dos filas con la misma clave no son un choque si describen la misma deuda:
+ * una planilla exportada de un ERP repite filas, y eso se deduplica. Se compara
+ * monto, vencimiento y moneda en crudo, que es lo mismo que mira `mismaDeuda`
+ * una vez convertidos.
+ */
+function choquesCon(
+  filas: Record<string, unknown>[],
+  header: string,
+  columnas: ColumnasDeIdentidad,
+): { restantes: number; vacias: number } {
+  const vistas = new Map<string, string>();
+  let restantes = 0;
+  let vacias = 0;
+
+  for (const fila of filas) {
+    const valor = texto(fila[header]);
+    if (!valor) {
+      vacias += 1;
+      continue;
+    }
+
+    const clave = `${texto(fila[columnas.externalId!])}\u0000${
+      columnas.loanNumber ? texto(fila[columnas.loanNumber]) : ""
+    }\u0000${valor}`;
+
+    const deuda = [
+      columnas.amount ? texto(fila[columnas.amount]) : "",
+      columnas.dueDate ? texto(fila[columnas.dueDate]) : "",
+      columnas.currency ? texto(fila[columnas.currency]) : "",
+    ].join("\u0000");
+
+    const previa = vistas.get(clave);
+    if (previa !== undefined && previa !== deuda) {
+      restantes += 1;
+      continue;
+    }
+    vistas.set(clave, deuda);
+  }
+
+  return { restantes, vacias };
+}
+
+/**
+ * Que columna del archivo serviria mejor como "Nro. de cuota".
  *
  * El caso que motiva esto: un cuotero trae "NR_FACTURA" con
- * "15701-2-3000332" —que es el numero del credito, igual en las 35 cuotas— y
- * "NR_CUO" con "13/35", que es la cuota de verdad. Mapear la primera hace que
- * las 35 filas del credito digan ser la misma deuda.
+ * "15701-2-3000332" —el numero del credito, igual en sus 35 cuotas— y "NR_CUO"
+ * con "13/35", que es la cuota de verdad. Mapeada la primera, las 35 filas
+ * dicen ser la misma deuda.
  *
- * Se prueba cada columna como si fuera la cuota y se busca una que deje todas
- * las deudas distintas. Entre las que sirven gana la que tiene forma "13/35":
- * es la senal mas fuerte de que una columna es un numero de cuota.
+ * Ranquea en vez de exigir perfeccion, y eso es el punto. La version anterior
+ * descartaba una columna al primer hueco o al primer repetido, asi que en un
+ * archivo real de 44 columnas y 5.000 filas —donde siempre hay una fila sucia—
+ * no encontraba nada y la pantalla decia "ninguna columna sirve" teniendo la
+ * correcta al lado. Ahora gana la que deja menos choques; entre iguales, la que
+ * tiene forma "13/35", que es la senal mas fuerte de un numero de cuota.
+ *
+ * Devuelve `null` solo si ninguna candidata mejora lo que ya hay.
  */
 export function sugerirColumnaDeCuota(
   filas: Record<string, unknown>[],
   headers: string[],
-  columnas: { externalId?: string; loanNumber?: string; invoiceNumber?: string },
-): string | null {
+  columnas: ColumnasDeIdentidad,
+): SugerenciaDeCuota | null {
   if (!columnas.externalId) return null;
 
-  const texto = (valor: unknown) =>
-    valor === null || valor === undefined ? "" : String(valor).trim();
-
-  const candidatas = headers.filter(
-    (h) =>
-      h !== columnas.invoiceNumber &&
-      h !== columnas.externalId &&
-      h !== columnas.loanNumber,
+  // Las columnas que ya arman la deuda quedan afuera. El monto sobre todo:
+  // sus valores suelen ser casi unicos, asi que ganaria el ranking y la
+  // sugerencia seria exactamente el error que esto existe para evitar —la
+  // cuota apuntando a una columna de plata.
+  const enUso = new Set(
+    [
+      columnas.invoiceNumber,
+      columnas.externalId,
+      columnas.loanNumber,
+      columnas.amount,
+      columnas.dueDate,
+      columnas.currency,
+    ].filter(Boolean) as string[],
   );
 
-  const sirven = candidatas.filter((header) => {
-    const claves = new Set<string>();
-    for (const fila of filas) {
-      const valor = texto(fila[header]);
-      // Una columna con huecos no puede identificar una cuota.
-      if (!valor) return false;
+  const candidatas = headers.filter((h) => !enUso.has(h));
+  if (candidatas.length === 0) return null;
 
-      const clave = `${texto(fila[columnas.externalId!])}\u0000${
-        columnas.loanNumber ? texto(fila[columnas.loanNumber]) : ""
-      }\u0000${valor}`;
-
-      if (claves.has(clave)) return false;
-      claves.add(clave);
-    }
-    return true;
-  });
-
-  if (sirven.length === 0) return null;
+  const actual = columnas.invoiceNumber
+    ? choquesCon(filas, columnas.invoiceNumber, columnas).restantes
+    : Number.POSITIVE_INFINITY;
 
   const muestra = filas.slice(0, 30);
-  const fraccion = sirven.find(
-    (header) =>
-      clasificarColumna(muestra.map((fila) => fila[header])) === "fraccion",
+  const puntuadas = candidatas
+    .map((columna, orden) => {
+      const clase = clasificarColumna(muestra.map((fila) => fila[columna]));
+      return {
+        columna,
+        orden,
+        clase,
+        esFraccion: clase === "fraccion",
+        ...choquesCon(filas, columna, columnas),
+      };
+    })
+    // Una columna vacia en todas las filas no identifica nada. Y una con forma
+    // de plata nunca es un numero de cuota, por mas que sus valores no repitan:
+    // es la misma regla que aplica el adivinador a los identificadores.
+    .filter(
+      (c) =>
+        c.vacias < filas.length &&
+        c.clase !== "monto" &&
+        c.clase !== "montocero",
+    );
+
+  if (puntuadas.length === 0) return null;
+
+  puntuadas.sort(
+    (a, b) =>
+      a.restantes - b.restantes ||
+      a.vacias - b.vacias ||
+      Number(b.esFraccion) - Number(a.esFraccion) ||
+      a.orden - b.orden,
   );
 
-  return fraccion ?? sirven[0];
+  const mejor = puntuadas[0];
+  if (mejor.restantes >= actual) return null;
+
+  return { columna: mejor.columna, restantes: mejor.restantes, vacias: mejor.vacias };
 }

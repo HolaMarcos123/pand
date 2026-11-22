@@ -176,12 +176,15 @@ export function UploadWizard({
   );
 
   /** Qué columna serviría como "Nro. de cuota". Solo se busca si hay choque. */
-  const columnaSugerida = useMemo(() => {
+  const sugerida = useMemo(() => {
     if (!repetida || !sheet) return null;
     return sugerirColumnaDeCuota(sheet.rows, sheet.headers, {
       externalId: mapping.externalId,
       loanNumber: mapping.loanNumber,
       invoiceNumber: mapping.invoiceNumber,
+      amount: mapping.amount,
+      dueDate: mapping.dueDate,
+      currency: mapping.currency,
     });
   }, [repetida, sheet, mapping]);
 
@@ -666,36 +669,62 @@ export function UploadWizard({
                     puede saber cuál es la deuda.
                   </p>
 
-                  {columnaSugerida ? (
+                  {sugerida ? (
                     <>
                       <p className="mt-2 text-xs text-pand-gris">
-                        La columna{" "}
-                        <strong className="font-semibold text-pand-contorno">
-                          {columnaSugerida}
-                        </strong>{" "}
-                        sí distingue cada cuota de este archivo. Suele pasar con
-                        los cuoteros: el número de comprobante es el del crédito
-                        y se repite en todas sus cuotas.
+                        {sugerida.restantes === 0 ? (
+                          <>
+                            La columna{" "}
+                            <strong className="font-semibold text-pand-contorno">
+                              {sugerida.columna}
+                            </strong>{" "}
+                            sí distingue cada cuota de este archivo. Suele pasar
+                            con los cuoteros: el número de comprobante es el del
+                            crédito y se repite en todas sus cuotas.
+                          </>
+                        ) : (
+                          <>
+                            La que más se acerca es{" "}
+                            <strong className="font-semibold text-pand-contorno">
+                              {sugerida.columna}
+                            </strong>
+                            : bajaría de {formatNumber(repetida.total)} a{" "}
+                            {formatNumber(sugerida.restantes)}. Si queda alguna,
+                            suele faltar mapear «Nro. de operación», que separa
+                            los créditos de un mismo deudor.
+                          </>
+                        )}
                       </p>
+
+                      {sugerida.vacias > 0 && (
+                        <p className="mt-1 text-xs text-pand-gris">
+                          Ojo: {formatNumber(sugerida.vacias)}{" "}
+                          {sugerida.vacias === 1 ? "fila no trae" : "filas no traen"}{" "}
+                          valor en esa columna, y el número de cuota es
+                          obligatorio — esas filas se van a saltear.
+                        </p>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => {
-                          asignarColumna(columnaSugerida, "invoiceNumber");
+                          asignarColumna(sugerida.columna, "invoiceNumber");
                           toast.success(
-                            `«Nro. de cuota» ahora toma ${columnaSugerida}.`,
+                            `«Nro. de cuota» ahora toma ${sugerida.columna}.`,
                           );
                         }}
                         className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-pand-azul hover:underline"
                       >
                         <Wand2 className="h-3 w-3" />
-                        Usar {columnaSugerida} como Nro. de cuota
+                        Usar {sugerida.columna} como Nro. de cuota
                       </button>
                     </>
                   ) : (
                     <p className="mt-2 text-xs text-pand-gris">
-                      Ninguna columna del archivo distingue las cuotas por sí
-                      sola. Si el deudor tiene varios créditos, mapeá también
-                      «Nro. de operación»: es la que los separa.
+                      Ninguna columna del archivo mejora esto por sí sola. Si el
+                      deudor tiene varios créditos, mapeá «Nro. de operación»:
+                      es la que los separa. Y revisá que «Nro. de cuota» apunte
+                      al identificador de la cuota y no al del crédito.
                     </p>
                   )}
                 </div>
