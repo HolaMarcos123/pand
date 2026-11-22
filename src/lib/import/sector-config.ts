@@ -276,17 +276,28 @@ export function clasificarColumnas(
 ): Map<string, ClaseDeColumna> {
   const muestras = new Map<string, unknown[]>(headers.map((h) => [h, []]));
 
+  // Solo se miran las columnas a las que todavia les falta muestra. En un
+  // cuotero real la mayoria se completa en las primeras filas y lo unico que
+  // obliga a recorrer el archivo entero son las que vienen vacias, que son
+  // pocas: sin esto se repasaban las 44 columnas en cada una de las 8.000
+  // filas para no juntar nada.
+  let pendientes = headers;
+
   for (const row of rows) {
-    let faltan = false;
-    for (const header of headers) {
-      const valores = muestras.get(header)!;
-      if (valores.length >= MUESTRA) continue;
-      faltan = true;
+    if (pendientes.length === 0) break;
+
+    let alguna = false;
+    for (const header of pendientes) {
       const valor = row[header];
       if (valor === null || valor === undefined || String(valor).trim() === "") continue;
+      const valores = muestras.get(header)!;
       valores.push(valor);
+      if (valores.length >= MUESTRA) alguna = true;
     }
-    if (!faltan) break;
+
+    if (alguna) {
+      pendientes = pendientes.filter((h) => muestras.get(h)!.length < MUESTRA);
+    }
   }
 
   const clase = new Map<string, ClaseDeColumna>();

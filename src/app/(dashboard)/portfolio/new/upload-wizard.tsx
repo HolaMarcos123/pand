@@ -175,18 +175,45 @@ export function UploadWizard({
     [validation],
   );
 
-  /** Qué columna distinguiría las deudas. Solo se busca si hay choque. */
+  /**
+   * Qué columna distinguiría las deudas. Solo se busca si hay choque.
+   *
+   * Depende de las seis columnas que arman la identidad de una deuda y no del
+   * mapeo entero: la búsqueda recorre el archivo varias veces, y en una cartera
+   * de 8.000 filas tarda lo suficiente como para que se note si se rehace al
+   * cambiar la columna del teléfono.
+   */
+  const colDeudor = mapping.externalId;
+  const colOperacion = mapping.loanNumber;
+  const colCuota = mapping.invoiceNumber;
+  const colMonto = mapping.amount;
+  const colVencimiento = mapping.dueDate;
+  const colMoneda = mapping.currency;
+
+  // Alcanza con saber SI hay choque: `repetida` es un objeto nuevo en cada
+  // revalidación y volvería a disparar la búsqueda sin que cambie nada.
+  const hayChoque = repetida !== null;
+
   const sugerida = useMemo(() => {
-    if (!repetida || !sheet) return null;
+    if (!hayChoque || !sheet) return null;
     return sugerirArreglo(sheet.rows, sheet.headers, {
-      externalId: mapping.externalId,
-      loanNumber: mapping.loanNumber,
-      invoiceNumber: mapping.invoiceNumber,
-      amount: mapping.amount,
-      dueDate: mapping.dueDate,
-      currency: mapping.currency,
+      externalId: colDeudor,
+      loanNumber: colOperacion,
+      invoiceNumber: colCuota,
+      amount: colMonto,
+      dueDate: colVencimiento,
+      currency: colMoneda,
     });
-  }, [repetida, sheet, mapping]);
+  }, [
+    hayChoque,
+    sheet,
+    colDeudor,
+    colOperacion,
+    colCuota,
+    colMonto,
+    colVencimiento,
+    colMoneda,
+  ]);
 
   /** Cómo se llama en esta pantalla el campo que la sugerencia quiere mapear. */
   const etiquetaDelArreglo = sugerida
