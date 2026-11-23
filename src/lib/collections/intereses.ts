@@ -87,6 +87,45 @@ export function interesPorDia(
   return (saldo * (tasa / 100)) / BASE_DIAS;
 }
 
+/** Una cuota, reducida a lo que el cálculo necesita. */
+export type CuotaDeInteres = {
+  /** Lo que falta pagar de esa cuota. */
+  saldo: number;
+  /** Días que lleva vencida. Cero o menos: todavía no venció. */
+  diasMora: number;
+};
+
+/**
+ * Interés de un conjunto de cuotas, **contando solo las vencidas**.
+ *
+ * Por qué no alcanza con `interesAcumulado(saldoTotal, moraMayor)`: una cuota
+ * que vence el mes que viene no devenga mora hoy, y las que ya vencieron no
+ * tienen todas la misma antigüedad. Aplicar los días del comprobante más viejo
+ * sobre la deuda entera —que es lo que hacía la ficha— cobraba 780 días de mora
+ * sobre cuotas que todavía no vencieron. En un crédito a 59 cuotas eso infla el
+ * interés varias veces, y el operador lo dice por teléfono.
+ *
+ * `base` es sobre qué se está cobrando: sirve para explicar el número y para
+ * calcular lo que corre por día, que tampoco es sobre el total.
+ */
+export function interesDeCuotas(
+  cuotas: CuotaDeInteres[],
+  config: ConfigInteres,
+  moneda?: string,
+): { interes: number; base: number; porDia: number } {
+  let interes = 0;
+  let base = 0;
+
+  for (const cuota of cuotas) {
+    const parcial = interesAcumulado(cuota.saldo, cuota.diasMora, config, moneda);
+    if (parcial <= 0) continue;
+    base += cuota.saldo;
+    interes += parcial;
+  }
+
+  return { interes, base, porDia: interesPorDia(base, config, moneda) };
+}
+
 /**
  * Si hay algo que mostrar. Con tasa en cero, la UI no dibuja la columna.
  *

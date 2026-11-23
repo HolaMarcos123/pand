@@ -7,6 +7,7 @@ import {
   tasaDe,
   type ConfigInteres,
   interesAcumulado,
+  interesDeCuotas,
   interesPorDia,
 } from "@/lib/collections/intereses";
 import { resolverSettings } from "@/lib/config/settings";
@@ -163,5 +164,67 @@ describe("tasa por moneda", () => {
 
     expect(Number.isNaN(interesAcumulado(1_000, 30, config, "USD"))).toBe(false);
     expect(interesAcumulado(1_000, 30, config, "USD")).toBe(0);
+  });
+});
+
+describe("interesDeCuotas", () => {
+  const CONFIG: ConfigInteres = { tasaMensual: 3, porMoneda: {} };
+
+  it("ignora las cuotas que todavia no vencieron", () => {
+    const { interes, base } = interesDeCuotas(
+      [
+        { saldo: 1_000, diasMora: 30 },
+        { saldo: 1_000, diasMora: 0 },
+        { saldo: 1_000, diasMora: -40 },
+      ],
+      CONFIG,
+    );
+
+    // 3 % de 1.000 en 30 dias, una sola vez: la base es la cuota vencida.
+    expect(interes).toBeCloseTo(30, 6);
+    expect(base).toBe(1_000);
+  });
+
+  it("cada cuota corre con sus propios dias, no con los de la mas vieja", () => {
+    const cuotas = [
+      { saldo: 1_000, diasMora: 300 },
+      { saldo: 1_000, diasMora: 30 },
+    ];
+
+    const { interes } = interesDeCuotas(cuotas, CONFIG);
+
+    expect(interes).toBeCloseTo(
+      interesAcumulado(1_000, 300, CONFIG) + interesAcumulado(1_000, 30, CONFIG),
+      6,
+    );
+    // Lo que hacia la ficha antes: 2.000 de saldo por los 300 dias del peor.
+    expect(interes).toBeLessThan(interesAcumulado(2_000, 300, CONFIG));
+  });
+
+  it("lo que corre por dia es sobre lo vencido, no sobre la deuda entera", () => {
+    const { porDia } = interesDeCuotas(
+      [
+        { saldo: 1_000, diasMora: 10 },
+        { saldo: 9_000, diasMora: 0 },
+      ],
+      CONFIG,
+    );
+
+    expect(porDia).toBeCloseTo(interesPorDia(1_000, CONFIG), 6);
+  });
+
+  it("usa la tasa de la moneda pedida", () => {
+    const config: ConfigInteres = { tasaMensual: 4.5, porMoneda: { USD: 1.2 } };
+    const cuotas = [{ saldo: 1_000, diasMora: 30 }];
+
+    expect(interesDeCuotas(cuotas, config, "USD").interes).toBeCloseTo(12, 6);
+    expect(interesDeCuotas(cuotas, config, "PYG").interes).toBeCloseTo(45, 6);
+  });
+
+  it("sin cuotas vencidas o sin tasa devuelve ceros, no NaN", () => {
+    expect(interesDeCuotas([], CONFIG)).toEqual({ interes: 0, base: 0, porDia: 0 });
+    expect(
+      interesDeCuotas([{ saldo: 1_000, diasMora: 90 }], INTERES_POR_DEFECTO),
+    ).toEqual({ interes: 0, base: 0, porDia: 0 });
   });
 });

@@ -23,7 +23,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import {
   calculaInteres,
   interesAcumulado,
-  interesPorDia,
+  interesDeCuotas,
   type ConfigInteres,
 } from "@/lib/collections/intereses";
 import {
@@ -109,6 +109,14 @@ export function ClientSheet({
   const [refNombre, setRefNombre] = useState("");
   const [refTelefono, setRefTelefono] = useState("");
   const [refVinculo, setRefVinculo] = useState("");
+  /**
+   * Las cuotas que el deudor dice que va a pagar.
+   *
+   * Vive en la pantalla y no en la base a propósito: es el borrador de una
+   * negociación telefónica, no un compromiso. Lo que queda registrado es la
+   * gestión que el operador guarda después.
+   */
+  const [elegidas, setElegidas] = useState<Set<string>>(() => new Set());
 
   // Formulario de gestión
   const [actionType, setActionType] = useState<ActionType>(
@@ -139,6 +147,7 @@ export function ClientSheet({
     setNextActionAt("");
     setPromiseAmount("");
     setPromiseDate("");
+    setElegidas(new Set());
 
     loadClientDetail(clientId)
       .then((data) => {
@@ -171,6 +180,72 @@ export function ClientSheet({
     (t): t is string => Boolean(t),
   );
   const operaciones = porOperacion(cuotas);
+
+  const abiertas = cuotas.filter(
+    (cuota) => cuota.status === "PENDING" || cuota.status === "PARTIAL",
+  );
+
+  // La columna de interés solo existe si alguna de las monedas de este deudor
+  // tiene tasa configurada. Sin eso sería una columna de guiones.
+  const muestraInteres = abiertas.some((cuota) =>
+    calculaInteres(cobranza, cuota.currency),
+  );
+
+  /**
+   * Lo que el deudor puede ofrecer pagar ahora.
+   *
+   * Se agrupa por moneda porque no se suman: dos cuotas en dólares y una en
+   * guaraníes son dos ofertas distintas, no un total.
+   */
+  const seleccion = (() => {
+    const porMoneda = new Map<
+      string,
+      { cantidad: number; capital: number; interes: number }
+    >();
+
+    for (const cuota of abiertas) {
+      if (!elegidas.has(cuota.id)) continue;
+      const saldo = cuota.amount - cuota.paidAmount;
+      const actual = porMoneda.get(cuota.currency) ?? {
+        cantidad: 0,
+        capital: 0,
+        interes: 0,
+      };
+      actual.cantidad += 1;
+      actual.capital += saldo;
+      actual.interes += interesAcumulado(
+        saldo,
+        cuota.daysOverdue,
+        cobranza,
+        cuota.currency,
+      );
+      porMoneda.set(cuota.currency, actual);
+    }
+
+    return [...porMoneda].map(([currency, datos]) => ({ currency, ...datos }));
+  })();
+
+  const elegidasTotal = seleccion.reduce((suma, s) => suma + s.cantidad, 0);
+
+  function alternarCuota(invoiceId: string) {
+    setElegidas((previas) => {
+      const siguientes = new Set(previas);
+      if (!siguientes.delete(invoiceId)) siguientes.add(invoiceId);
+      return siguientes;
+    });
+  }
+
+  /** Marca o desmarca de un saque todas las cuotas abiertas de una operación. */
+  function alternarOperacion(ids: string[], marcar: boolean) {
+    setElegidas((previas) => {
+      const siguientes = new Set(previas);
+      for (const id of ids) {
+        if (marcar) siguientes.add(id);
+        else siguientes.delete(id);
+      }
+      return siguientes;
+    });
+  }
 
   const tiposDisponibles = tiposCargables(tipificaciones);
   const availableResults = resultadosDe(tipificaciones, actionType);
@@ -308,8 +383,8 @@ export function ClientSheet({
                 vuelve a ser una sola columna apilada. */}
             <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
             <div className="min-w-0 flex-1 overflow-y-auto lg:border-r lg:border-pand-border">
-              {/* ── A · Perfil ───────────────────────────────── */}
-              <section className="border-b border-pand-border bg-white p-6">
+              {/* ── A · Quién es ─────────────────────────────── */}
+              <section className="border-b border-pand-border bg-white px-6 py-5">
                 <div className="flex items-start justify-between gap-3">
                   <SheetTitle className="text-xl font-extrabold">
                     {detail.name}
@@ -379,90 +454,6 @@ export function ClientSheet({
                   </dl>
                 )}
 
-                {/* Un bloque por moneda. No se suman: un deudor con una prenda
-                    en dólares y una tarjeta en guaraníes tiene dos deudas, y el
-                    total junto sería un número que no significa nada sin tipo de
-                    cambio — que Pand no tiene. */}
-                <div className="mt-5 space-y-3">
-                  {(detail.saldos.length > 0
-                    ? detail.saldos
-                    : [{ currency, total: detail.totalDebt, delMes: 0, diasMora: detail.daysOverdue }]
-                  ).map((saldo) => {
-                    // Con la tasa de SU moneda: una prenda en dolares no
-                    // devenga al mismo porcentaje que un credito en guaranies.
-                    const interes = interesAcumulado(
-                      saldo.total,
-                      saldo.diasMora,
-                      cobranza,
-                      saldo.currency,
-                    );
-
-                    return (
-                      <div
-                        key={saldo.currency}
-                        className="rounded-card border border-pand-border bg-white p-4"
-                      >
-                        <div className="flex flex-wrap items-baseline justify-between gap-2">
-                          <span className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
-                            Deuda abierta
-                            {detail.saldos.length > 1 && (
-                              <span className="mono ml-2 rounded-badge bg-pand-bg px-1.5 py-0.5 text-[10px]">
-                                {saldo.currency}
-                              </span>
-                            )}
-                          </span>
-                          <span
-                            className={cn(
-                              "mono text-xs",
-                              saldo.diasMora > 90 && "text-pand-coral",
-                            )}
-                          >
-                            {formatNumber(saldo.diasMora)} días de mora
-                          </span>
-                        </div>
-
-                        <p className="mono mt-1 text-2xl font-medium">
-                          {formatCurrency(saldo.total, saldo.currency)}
-                        </p>
-
-                        <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-pand-border pt-3 text-sm">
-                          <div>
-                            {/* Lo que se gestiona hoy: vencido más lo que vence
-                                antes de fin de mes. El total de arriba incluye
-                                cuotas de dentro de medio año. */}
-                            <dt className="text-xs text-pand-gris">Vencido y del mes</dt>
-                            <dd className="mono font-semibold">
-                              {formatCurrency(saldo.delMes, saldo.currency)}
-                            </dd>
-                          </div>
-
-                          {calculaInteres(cobranza, saldo.currency) && interes > 0 && (
-                            <div>
-                              <dt className="text-xs text-pand-gris">
-                                Interés estimado
-                              </dt>
-                              <dd className="mono font-semibold text-pand-coral">
-                                {formatCurrency(interes, saldo.currency)}
-                              </dd>
-                              <dd className="mt-0.5 text-[11px] text-pand-gris">
-                                {formatCurrency(
-                                  interesPorDia(
-                                    saldo.total,
-                                    cobranza,
-                                    saldo.currency,
-                                  ),
-                                  saldo.currency,
-                                )}{" "}
-                                por día
-                              </dd>
-                            </div>
-                          )}
-                        </dl>
-                      </div>
-                    );
-                  })}
-                </div>
-
                 {/* El score de riesgo lo produce el agente de IA (P07): mostrarlo en
                     un plan que no lo incluye seria prometer algo que no existe. */}
                 {canSeeScore && detail.riskScore !== null && (
@@ -481,12 +472,168 @@ export function ClientSheet({
                     </div>
                   </div>
                 )}
+              </section>
 
-                {/* Referencias personales: a quién llamar cuando el deudor no
-                    atiende. Van arriba de los comprobantes a propósito — cuando
-                    el teléfono del deudor no contesta, esto es lo siguiente que
-                    el operador busca. */}
-                <div className="mt-5 rounded-card border border-pand-border p-4">
+              {/* ── B · Cuánto debe ──────────────────────────── */}
+              {/* Un bloque por moneda. No se suman: un deudor con una prenda en
+                  dólares y una tarjeta en guaraníes tiene dos deudas, y el total
+                  junto sería un número que no significa nada sin tipo de cambio
+                  — que Pand no tiene. */}
+              <section className="space-y-4 border-b border-pand-border bg-white px-6 py-5">
+                {(detail.saldos.length > 0
+                  ? detail.saldos
+                  : [
+                      {
+                        currency,
+                        total: detail.totalDebt,
+                        delMes: 0,
+                        diasMora: detail.daysOverdue,
+                      },
+                    ]
+                ).map((saldo) => {
+                  // Solo las cuotas YA vencidas de esa moneda, cada una con sus
+                  // propios dias. Antes se aplicaban los dias del comprobante
+                  // mas viejo sobre la deuda entera, y eso cobraba mora sobre
+                  // cuotas que todavia no vencieron.
+                  const { interes, base, porDia } = interesDeCuotas(
+                    abiertas
+                      .filter((cuota) => cuota.currency === saldo.currency)
+                      .map((cuota) => ({
+                        saldo: cuota.amount - cuota.paidAmount,
+                        diasMora: cuota.daysOverdue,
+                      })),
+                    cobranza,
+                    saldo.currency,
+                  );
+
+                  return (
+                    <div key={saldo.currency}>
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
+                          Deuda abierta
+                          {detail.saldos.length > 1 && (
+                            <span className="mono ml-2 rounded-badge bg-pand-bg px-1.5 py-0.5 text-[10px]">
+                              {saldo.currency}
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          className={cn(
+                            "mono text-xs",
+                            saldo.diasMora > 90 && "text-pand-coral",
+                          )}
+                        >
+                          {formatNumber(saldo.diasMora)} días de mora
+                        </span>
+                      </div>
+
+                      <p className="mono mt-1.5 text-[26px] font-medium leading-none">
+                        {formatCurrency(saldo.total, saldo.currency)}
+                      </p>
+
+                      <dl className="mt-4 grid grid-cols-2 gap-4 border-t border-pand-border pt-3 text-sm">
+                        <div>
+                          {/* Lo que se gestiona hoy: vencido más lo que vence
+                              antes de fin de mes. El total de arriba incluye
+                              cuotas de dentro de medio año. */}
+                          <dt className="text-xs text-pand-gris">
+                            Vencido y del mes
+                          </dt>
+                          <dd className="mono font-semibold">
+                            {formatCurrency(saldo.delMes, saldo.currency)}
+                          </dd>
+                        </div>
+
+                        {calculaInteres(cobranza, saldo.currency) && interes > 0 && (
+                          <div>
+                            <dt className="text-xs text-pand-gris">
+                              Interés de lo vencido
+                            </dt>
+                            <dd className="mono font-semibold text-pand-coral">
+                              {formatCurrency(interes, saldo.currency)}
+                            </dd>
+                            <dd className="mt-1 text-[11px] leading-snug text-pand-gris">
+                              sobre {formatCurrency(base, saldo.currency)} ·{" "}
+                              {formatCurrency(porDia, saldo.currency)} por día
+                            </dd>
+                          </div>
+                        )}
+                      </dl>
+                    </div>
+                  );
+                })}
+
+                {/* El acuerdo que se está armando por teléfono. Aparece solo
+                    cuando hay cuotas tildadas: el resto del tiempo sería una
+                    caja vacía ocupando el lugar de la deuda. */}
+                {elegidasTotal > 0 && (
+                  <div className="rounded-card border border-pand-azul bg-pand-bg p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-pand-azul">
+                        A pagar · {formatNumber(elegidasTotal)}{" "}
+                        {elegidasTotal === 1 ? "cuota" : "cuotas"}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setElegidas(new Set())}
+                        className="text-xs text-pand-gris hover:underline"
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+
+                    <div className="mt-3 space-y-3">
+                      {seleccion.map((grupo) => (
+                        <dl key={grupo.currency} className="space-y-1 text-sm">
+                          {seleccion.length > 1 && (
+                            <p className="mono text-[10px] uppercase text-pand-gris">
+                              {grupo.currency}
+                            </p>
+                          )}
+                          <div className="flex justify-between gap-2">
+                            <dt className="text-pand-gris">Cuotas</dt>
+                            <dd className="mono">
+                              {formatCurrency(grupo.capital, grupo.currency)}
+                            </dd>
+                          </div>
+                          {grupo.interes > 0 && (
+                            <div className="flex justify-between gap-2">
+                              <dt className="text-pand-gris">Interés</dt>
+                              <dd className="mono text-pand-coral">
+                                {formatCurrency(grupo.interes, grupo.currency)}
+                              </dd>
+                            </div>
+                          )}
+                          <div className="flex justify-between gap-2 border-t border-pand-border pt-1.5 font-semibold">
+                            <dt>Total</dt>
+                            <dd className="mono">
+                              {formatCurrency(
+                                grupo.capital + grupo.interes,
+                                grupo.currency,
+                              )}
+                            </dd>
+                          </div>
+                        </dl>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => setPayOpen(true)}
+                >
+                  <Banknote className="mr-2 h-4 w-4" />
+                  Registrar cobro
+                </Button>
+              </section>
+
+              {/* ── C · Referencias ──────────────────────────── */}
+              {/* A quién llamar cuando el deudor no atiende. Van arriba de las
+                  cuotas a propósito: cuando el teléfono no contesta, esto es lo
+                  siguiente que el operador busca. */}
+              <section className="border-b border-pand-border px-6 py-5">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
                       Referencias
@@ -609,23 +756,20 @@ export function ClientSheet({
                       </div>
                     </div>
                   )}
-                </div>
-
-                <Button
-                  variant="outline"
-                  className="mt-5 w-full"
-                  onClick={() => setPayOpen(true)}
-                >
-                  <Banknote className="mr-2 h-4 w-4" />
-                  Registrar cobro
-                </Button>
               </section>
 
-              {/* ── B · Cuotas, agrupadas por operación ───────── */}
-              <section className="border-b border-pand-border p-6">
-                <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
-                  Cuotas
-                </p>
+              {/* ── D · Cuotas, agrupadas por operación ───────── */}
+              <section className="border-b border-pand-border px-6 py-5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
+                    Cuotas
+                  </p>
+                  {abiertas.length > 0 && (
+                    <p className="text-[11px] text-pand-gris">
+                      Tildá las que va a pagar
+                    </p>
+                  )}
+                </div>
 
                 {cuotas.length === 0 ? (
                   <p className="mt-3 text-sm text-pand-gris">Sin cuotas cargadas.</p>
@@ -637,6 +781,17 @@ export function ClientSheet({
                       // deudor no se repite acá.
                       const propiosDeLaOperacion = constantes(operacion.cuotas)
                         .datos.filter((p) => !etiquetasDelDeudor.has(p.label));
+
+                      const idsAbiertas = operacion.cuotas
+                        .filter(
+                          (cuota) =>
+                            cuota.status === "PENDING" ||
+                            cuota.status === "PARTIAL",
+                        )
+                        .map((cuota) => cuota.id);
+                      const todasElegidas =
+                        idsAbiertas.length > 0 &&
+                        idsAbiertas.every((id) => elegidas.has(id));
 
                       return (
                         <div
@@ -698,20 +853,45 @@ export function ClientSheet({
                             )}
                           </div>
 
-                          {/* Tres columnas y nada más: cuota, cuándo vence y
-                              cuánto. Lo que trae la planilla por cuota —el
-                              tramo, el saldo— se repetía en las 48 líneas del
-                              crédito y tapaba justamente estas tres cosas. */}
+                          {/* Cuota, cuándo vence, cuánto interés corrió y
+                              cuánto es. El estado no está como columna: mientras
+                              la cuota figure acá sigue abierta, y cuando se cobra
+                              desaparece sola. Refinanciar o castigar sigue
+                              disponible, pero aparece al pasar el mouse: es una
+                              decisión excepcional, no una columna. */}
                           <table className="w-full table-fixed text-sm">
                             <thead>
                               <tr className="text-[11px] uppercase tracking-wider text-pand-gris">
-                                <th className="w-[22%] px-3 py-1.5 text-left font-medium">
+                                <th className="w-9 px-2 py-2">
+                                  {idsAbiertas.length > 0 && (
+                                    <input
+                                      type="checkbox"
+                                      className="h-3.5 w-3.5 cursor-pointer align-middle accent-pand-azul"
+                                      checked={todasElegidas}
+                                      aria-label={`Elegir todas las cuotas de ${
+                                        operacion.loanNumber || "la operación"
+                                      }`}
+                                      onChange={(event) =>
+                                        alternarOperacion(
+                                          idsAbiertas,
+                                          event.target.checked,
+                                        )
+                                      }
+                                    />
+                                  )}
+                                </th>
+                                <th className="w-[16%] px-2 py-2 text-left font-medium">
                                   Cuota
                                 </th>
-                                <th className="px-3 py-1.5 text-left font-medium">
+                                <th className="px-2 py-2 text-left font-medium">
                                   Vencimiento
                                 </th>
-                                <th className="w-[38%] px-3 py-1.5 text-right font-medium">
+                                {muestraInteres && (
+                                  <th className="w-[22%] px-2 py-2 text-right font-medium">
+                                    Interés
+                                  </th>
+                                )}
+                                <th className="w-[26%] px-2 py-2 text-right font-medium">
                                   Importe
                                 </th>
                               </tr>
@@ -722,21 +902,121 @@ export function ClientSheet({
                                   invoice.status === "PENDING" ||
                                   invoice.status === "PARTIAL";
                                 const overdue = open && invoice.daysOverdue > 0;
+                                const saldo = invoice.amount - invoice.paidAmount;
+                                // El interés de ESTA cuota, con sus días: una
+                                // que todavía no venció no devenga nada.
+                                const interes = open
+                                  ? interesAcumulado(
+                                      saldo,
+                                      invoice.daysOverdue,
+                                      cobranza,
+                                      invoice.currency,
+                                    )
+                                  : 0;
+                                const elegida = elegidas.has(invoice.id);
+
+                                // Flota sobre la fila al pasar el mouse en vez
+                                // de ocupar un renglón propio: reservarle lugar
+                                // en las 59 cuotas estiraba la tabla por algo
+                                // que casi nunca se usa.
+                                const cambiarEstadoAqui =
+                                  canChangeInvoiceStatus &&
+                                  invoice.status !== "PAID" && (
+                                    <NativeSelect
+                                      aria-label={`Estado de la cuota ${invoice.invoiceNumber}`}
+                                      className="absolute right-2 top-1/2 z-10 h-6 w-[124px] -translate-y-1/2 bg-white text-[11px] opacity-0 shadow-sm transition-opacity focus:opacity-100 group-hover:opacity-100"
+                                      value=""
+                                      disabled={changingInvoice === invoice.id}
+                                      onChange={(event) => {
+                                        const next = event.target
+                                          .value as ManualInvoiceStatus;
+                                        if (!next) return;
+                                        cambiarEstado(invoice.id, next);
+                                      }}
+                                    >
+                                      <option value="">Cambiar…</option>
+                                      {MANUAL_INVOICE_STATUSES.filter(
+                                        (option) =>
+                                          option.value !== invoice.status &&
+                                          // "Volver a cartera" no tiene sentido si ya está.
+                                          !(
+                                            option.value === "PENDING" &&
+                                            esCarteraActiva(
+                                              invoice.status as InvoiceStatus,
+                                            )
+                                          ),
+                                      ).map((option) => (
+                                        <option
+                                          key={option.value}
+                                          value={option.value}
+                                          title={option.hint}
+                                        >
+                                          {option.label}
+                                        </option>
+                                      ))}
+                                    </NativeSelect>
+                                  );
 
                                 return (
-                                  <tr key={invoice.id} className="align-middle">
-                                    <td className="mono px-3 py-2 font-medium">
+                                  <tr
+                                    key={invoice.id}
+                                    className={cn(
+                                      "group align-middle",
+                                      elegida && "bg-pand-bg",
+                                    )}
+                                  >
+                                    <td className="px-2 py-2.5">
+                                      {open && (
+                                        <input
+                                          type="checkbox"
+                                          className="h-3.5 w-3.5 cursor-pointer align-middle accent-pand-azul"
+                                          checked={elegida}
+                                          aria-label={`Elegir la cuota ${invoice.invoiceNumber}`}
+                                          onChange={() => alternarCuota(invoice.id)}
+                                        />
+                                      )}
+                                    </td>
+                                    <td className="mono px-2 py-2.5 font-medium">
                                       {invoice.invoiceNumber}
                                     </td>
-                                    <td className="mono px-3 py-2 text-xs text-pand-gris">
+                                    <td className="mono px-2 py-2.5 text-xs text-pand-gris">
                                       {invoice.dueDate}
                                       {overdue && (
-                                        <span className="ml-2 text-pand-coral">
+                                        <span className="ml-1.5 text-pand-coral">
                                           +{invoice.daysOverdue} d
                                         </span>
                                       )}
+                                      {/* El estado solo se nombra cuando es
+                                          excepcional: "Pendiente" repetido en
+                                          las 59 líneas no decía nada. */}
+                                      {!open && (
+                                        <span
+                                          className={cn(
+                                            "ml-1.5",
+                                            INVOICE_STATUS_TONE[
+                                              invoice.status as InvoiceStatus
+                                            ],
+                                          )}
+                                        >
+                                          {INVOICE_STATUS_LABELS[
+                                            invoice.status as InvoiceStatus
+                                          ] ?? invoice.status}
+                                        </span>
+                                      )}
                                     </td>
-                                    <td className="px-3 py-2 text-right">
+                                    {muestraInteres && (
+                                      // El control de estado flota acá y no
+                                      // sobre el importe: tapar el número que
+                                      // el operador está leyendo en voz alta es
+                                      // peor que tapar el interés.
+                                      <td className="mono relative px-2 py-2.5 text-right text-xs text-pand-coral">
+                                        {interes > 0
+                                          ? formatCurrency(interes, invoice.currency)
+                                          : "—"}
+                                        {cambiarEstadoAqui}
+                                      </td>
+                                    )}
+                                    <td className="relative px-2 py-2.5 text-right">
                                       {/* En la moneda de la cuota, no en la de
                                           la organización: una cuota de USD 654
                                           mostrada como Gs. 654 queda 7.000
@@ -749,63 +1029,9 @@ export function ClientSheet({
                                             "text-pand-coral",
                                         )}
                                       >
-                                        {formatCurrency(
-                                          invoice.amount - invoice.paidAmount,
-                                          invoice.currency,
-                                        )}
+                                        {formatCurrency(saldo, invoice.currency)}
                                       </p>
-                                      <div className="flex items-center justify-end gap-2">
-                                        <span
-                                          className={cn(
-                                            "text-xs",
-                                            INVOICE_STATUS_TONE[
-                                              invoice.status as InvoiceStatus
-                                            ],
-                                          )}
-                                        >
-                                          {INVOICE_STATUS_LABELS[
-                                            invoice.status as InvoiceStatus
-                                          ] ?? invoice.status}
-                                        </span>
-                                        {canChangeInvoiceStatus &&
-                                          invoice.status !== "PAID" && (
-                                            <NativeSelect
-                                              aria-label={`Estado de la cuota ${invoice.invoiceNumber}`}
-                                              className="h-7 w-[132px] text-xs"
-                                              value=""
-                                              disabled={
-                                                changingInvoice === invoice.id
-                                              }
-                                              onChange={(event) => {
-                                                const next = event.target
-                                                  .value as ManualInvoiceStatus;
-                                                if (!next) return;
-                                                cambiarEstado(invoice.id, next);
-                                              }}
-                                            >
-                                              <option value="">Cambiar…</option>
-                                              {MANUAL_INVOICE_STATUSES.filter(
-                                                (option) =>
-                                                  option.value !== invoice.status &&
-                                                  // "Volver a cartera" no tiene sentido si ya está.
-                                                  !(
-                                                    option.value === "PENDING" &&
-                                                    esCarteraActiva(
-                                                      invoice.status as InvoiceStatus,
-                                                    )
-                                                  ),
-                                              ).map((option) => (
-                                                <option
-                                                  key={option.value}
-                                                  value={option.value}
-                                                  title={option.hint}
-                                                >
-                                                  {option.label}
-                                                </option>
-                                              ))}
-                                            </NativeSelect>
-                                          )}
-                                      </div>
+                                      {!muestraInteres && cambiarEstadoAqui}
                                     </td>
                                   </tr>
                                 );
