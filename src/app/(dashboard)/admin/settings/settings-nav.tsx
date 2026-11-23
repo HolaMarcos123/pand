@@ -27,7 +27,7 @@ const SECCIONES = [
     icon: ListChecks,
   },
   {
-    href: "/admin/users",
+    href: "/admin/settings/usuarios",
     label: "Usuarios",
     hint: "Equipo, roles e invitaciones",
     icon: Users,

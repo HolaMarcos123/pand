@@ -10,7 +10,7 @@ import { requireSession } from "@/lib/auth/session";
  * Next renderiza el layout y la página EN PARALELO. Que este layout devuelva el 403
  * en lugar de `{children}` evita que la página se vea, pero la página igual se
  * ejecutó: consultó la base y su resultado quedó serializado en el flight payload de
- * RSC que viaja dentro del HTML. Un operador que abría /admin/users veía el 403 en
+ * RSC que viaja dentro del HTML. Un operador que abría /admin/settings/usuarios veía el 403 en
  * pantalla y tenía la lista completa de usuarios —nombres, emails, roles, ids— en el
  * código fuente.
  *

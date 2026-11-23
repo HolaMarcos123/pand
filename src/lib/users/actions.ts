@@ -103,7 +103,7 @@ export async function desactivarUsuario(
     }),
   ]);
 
-  revalidatePath("/admin/users");
+  revalidatePath("/admin/settings/usuarios");
   return { ok: true };
 }
 
@@ -139,7 +139,7 @@ export async function reactivarUsuario(
     }),
   ]);
 
-  revalidatePath("/admin/users");
+  revalidatePath("/admin/settings/usuarios");
   return { ok: true };
 }
 
@@ -208,7 +208,7 @@ export async function eliminarUsuario(
     // Si Auth no responde, la fila ya no está y la persona no puede entrar. Lo
     // único que queda pendiente es que el email siga ocupado para una nueva
     // invitación, y eso se resuelve desde el dashboard de Supabase.
-    revalidatePath("/admin/users");
+    revalidatePath("/admin/settings/usuarios");
     return {
       ok: false,
       error:
@@ -217,6 +217,6 @@ export async function eliminarUsuario(
     };
   }
 
-  revalidatePath("/admin/users");
+  revalidatePath("/admin/settings/usuarios");
   return { ok: true, desasignados: asignados };
 }
