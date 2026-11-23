@@ -145,3 +145,37 @@ describe("tipificaciones configuradas", () => {
     expect(labelResultado(config, "VAYA_A_SABER")).toBe("VAYA_A_SABER");
   });
 });
+
+describe("campos propios: donde se ven", () => {
+  const leer = (campos: unknown) =>
+    resolverSettings({ camposPropios: campos }).camposPropios;
+
+  /**
+   * Los campos definidos antes de que existiera la opcion se veian todos.
+   * Apagarlos de golpe seria sacarle datos de la pantalla a alguien que no
+   * pidio nada.
+   */
+  it("un campo sin el dato guardado se muestra", () => {
+    expect(leer([{ id: "sucursal", label: "Sucursal", tipo: "texto" }])).toEqual([
+      { id: "sucursal", label: "Sucursal", tipo: "texto", enFicha: true },
+    ]);
+  });
+
+  it("respeta el campo apagado", () => {
+    const campos = leer([
+      { id: "nro_rec", label: "Nro. de recibo", tipo: "texto", enFicha: false },
+    ]);
+
+    expect(campos[0].enFicha).toBe(false);
+  });
+
+  it("sigue descartando los ids repetidos", () => {
+    const campos = leer([
+      { id: "sucursal", label: "Sucursal", tipo: "texto" },
+      { id: "sucursal", label: "Otra", tipo: "texto", enFicha: false },
+    ]);
+
+    expect(campos).toHaveLength(1);
+    expect(campos[0].label).toBe("Sucursal");
+  });
+});

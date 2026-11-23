@@ -30,7 +30,10 @@ export function CamposForm({ campos }: { campos: CampoPropio[] }) {
   const [saving, startSaving] = useTransition();
 
   function agregar() {
-    setFilas((f) => [...f, { id: "", label: "", tipo: "texto", original: null }]);
+    setFilas((f) => [
+      ...f,
+      { id: "", label: "", tipo: "texto", enFicha: true, original: null },
+    ]);
   }
 
   function cambiar(indice: number, cambio: Partial<Fila>) {
@@ -49,6 +52,7 @@ export function CamposForm({ campos }: { campos: CampoPropio[] }) {
         id: f.original ?? idDeCampo(f.label),
         label: f.label.trim(),
         tipo: f.tipo,
+        enFicha: f.enFicha,
       }))
       .filter((f) => f.label.length > 0 && f.id.length > 0);
 
@@ -116,6 +120,20 @@ export function CamposForm({ campos }: { campos: CampoPropio[] }) {
                   ))}
                 </NativeSelect>
               </div>
+
+              {/* Que se importa y que ve el operador son dos cosas distintas.
+                  Una planilla real trae 44 columnas: el numero de recibo o la
+                  referencia de transferencia sirven para conciliar, no para la
+                  llamada, y en la ficha son ruido arriba del telefono. */}
+              <label className="flex items-center gap-2 pb-2.5 text-sm text-pand-gris">
+                <input
+                  type="checkbox"
+                  checked={fila.enFicha}
+                  onChange={(e) => cambiar(i, { enFicha: e.target.checked })}
+                  className="h-4 w-4 rounded border-pand-border"
+                />
+                En el panel
+              </label>
 
               <Button
                 variant="ghost"

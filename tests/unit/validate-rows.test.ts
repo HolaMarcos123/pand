@@ -205,7 +205,7 @@ describe("validateRows — moneda", () => {
  */
 describe("validateRows — campos propios", () => {
   const CAMPOS_CON_TELEFONO = fieldsFor("FINANCIAL", [
-    { id: "telef3", label: "Telef3", tipo: "numero" },
+    { id: "telef3", label: "Telef3", tipo: "numero", enFicha: true },
   ]);
   const MAPEO_CON_TELEFONO = { ...MAPEO, "custom:telef3": "Telef3" };
 
@@ -275,7 +275,7 @@ describe("validateRows — campos propios", () => {
 
   it("una fecha propia que no se entiende tampoco descarta la fila", () => {
     const campos = fieldsFor("FINANCIAL", [
-      { id: "ultima_visita", label: "Última visita", tipo: "fecha" },
+      { id: "ultima_visita", label: "Última visita", tipo: "fecha", enFicha: true },
     ]);
 
     const { valid, avisos } = validateRows(

@@ -236,6 +236,10 @@ function valoresPropios(
   const datos = metadata as Record<string, unknown>;
 
   return campos
+    // Lo que la organizacion eligio no mostrar en el panel de gestion. El valor
+    // sigue guardado en el comprobante: esto es que ve el operador, no que se
+    // importa.
+    .filter((campo) => campo.enFicha)
     .map((campo) => ({ label: campo.label, valor: datos[campo.id] }))
     .filter((x) => x.valor !== null && x.valor !== undefined && x.valor !== "")
     .map((x) => ({ label: x.label, valor: String(x.valor) }));

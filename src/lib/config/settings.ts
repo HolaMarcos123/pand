@@ -131,6 +131,19 @@ export type CampoPropio = {
   id: string;
   label: string;
   tipo: TipoDeCampo;
+  /**
+   * Si se muestra en el panel de gestion.
+   *
+   * Una planilla real trae 44 columnas y la organizacion importa las que le
+   * sirven, pero no todas le sirven al operador que esta llamando: el numero de
+   * recibo o la referencia de transferencia son para conciliar, no para la
+   * llamada. Se siguen guardando y exportando; lo que se elige es que ve quien
+   * atiende el telefono.
+   *
+   * Por defecto `true`: un campo que alguien se tomo el trabajo de importar se
+   * muestra salvo que diga lo contrario.
+   */
+  enFicha: boolean;
 };
 
 /** Tope por organizacion. No es una limitacion tecnica: es para que la pantalla
@@ -143,6 +156,7 @@ const campoPropioSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
   label: z.string().trim().min(1).max(60),
   tipo: z.enum(TIPOS_DE_CAMPO.map((t) => t.value) as [TipoDeCampo, ...TipoDeCampo[]]),
+  enFicha: z.boolean().optional(),
 });
 
 /** Convierte una etiqueta escrita por una persona en un id estable. */
@@ -215,9 +229,12 @@ export function resolverSettings(raw: unknown): Settings {
     tipificaciones: resolverTipificaciones(guardado.tipificaciones),
     // Se descartan los ids repetidos: dos campos con el mismo id escribirian
     // sobre la misma clave y uno pisaria al otro sin aviso.
-    camposPropios: (guardado.camposPropios ?? []).filter(
-      (campo, i, todos) => todos.findIndex((c) => c.id === campo.id) === i,
-    ),
+    camposPropios: (guardado.camposPropios ?? [])
+      .filter((campo, i, todos) => todos.findIndex((c) => c.id === campo.id) === i)
+      // Sin el dato guardado, se muestra: los campos definidos antes de que
+      // existiera esta opcion se veian todos, y apagarlos de golpe seria
+      // sacarle datos de la pantalla a alguien que no pidio nada.
+      .map((campo) => ({ ...campo, enFicha: campo.enFicha ?? true })),
     cobranza: {
       tasaMensual:
         guardado.cobranza?.tasaMensual ?? INTERES_POR_DEFECTO.tasaMensual,

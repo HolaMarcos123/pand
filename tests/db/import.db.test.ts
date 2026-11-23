@@ -464,8 +464,13 @@ describe("moneda", () => {
 
 describe("campos propios de la organización", () => {
   const CAMPOS = [
-    { id: "sucursal", label: "Sucursal", tipo: "texto" as const },
-    { id: "aux_cobranza", label: "Auxiliar de cobranza", tipo: "texto" as const },
+    { id: "sucursal", label: "Sucursal", tipo: "texto" as const, enFicha: true },
+    {
+      id: "aux_cobranza",
+      label: "Auxiliar de cobranza",
+      tipo: "texto" as const,
+      enFicha: true,
+    },
   ];
 
   beforeEach(async () => {

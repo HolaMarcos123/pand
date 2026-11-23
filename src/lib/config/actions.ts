@@ -291,6 +291,9 @@ export async function agregarCampoPropio(
     id: idDeCampo(parsed.data.label),
     label: parsed.data.label,
     tipo: parsed.data.tipo,
+    // Un campo que alguien crea desde la pantalla de mapeo lo crea porque lo
+    // quiere ver: apagarlo de entrada seria esconderlo apenas se guarda.
+    enFicha: true,
   };
 
   const repetido = actuales.find((c) => c.id === campo.id);
