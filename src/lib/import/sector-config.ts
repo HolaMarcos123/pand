@@ -205,7 +205,11 @@ const ALIASES: Record<FieldKey, string[]> = {
   // "nrcuo" y "cuo" van explicitas: la planilla real escribe "NR_CUO", que al
   // normalizar queda "nrcuo" y no matcheaba contra "nrocuo".
   invoiceNumber: ["nrcuo", "nrocuo", "cuo", "nrcuota", "nrocuota", "numerocuota", "cuotanro", "cuota", "factura", "nrfactura", "nrofactura", "numerofactura", "comprobante", "nrocomprobante", "boleta", "invoice"],
-  product: ["producto", "articulo", "item", "bien", "linea", "lineacredito", "plan", "servicio", "tipoproducto", "product"],
+  // "descproducto" y "modelo" explicitos: el cuotero real escribe
+  // "DESC_PRODUCTO", que al normalizar queda "descproducto" y no empieza con
+  // "producto", asi que la columna del bien financiado quedaba sin mapear y la
+  // lista de clientes mostraba un guion en la columna Producto.
+  product: ["producto", "descproducto", "descripcionproducto", "modelo", "articulo", "item", "bien", "linea", "lineacredito", "plan", "servicio", "tipoproducto", "product"],
   amount: ["montocuota", "importecuota", "valorcuota", "cuota", "monto", "importe", "saldo", "deuda", "total", "amount", "valor"],
   dueDate: ["fchvto", "fchvencimiento", "fvto", "vencimiento", "fechavencimiento", "fechavto", "vto", "duedate", "fecha"],
   // Sin "mon": por startsWith se llevaba "MONTO_APLICADO".

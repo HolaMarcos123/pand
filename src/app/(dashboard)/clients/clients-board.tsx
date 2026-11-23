@@ -76,6 +76,7 @@ export function ClientsBoard({
   portfolios,
   operators,
   products,
+  monedas,
   segments,
   currency,
   canAssign,
@@ -88,6 +89,8 @@ export function ClientsBoard({
   portfolios: { id: string; name: string }[];
   operators: { id: string; fullName: string; role: string }[];
   products: string[];
+  /** Las monedas con deuda abierta, para el filtro. */
+  monedas: string[];
   segments: SegmentRow[];
   currency: string;
   canAssign: boolean;
@@ -102,6 +105,7 @@ export function ClientsBoard({
     assigned: string;
     tramo: string;
     product: string;
+    currency: string;
   };
 }) {
   const router = useRouter();
@@ -404,6 +408,24 @@ export function ClientsBoard({
           {/* Castigo va aparte: no es cartera activa, pero se tiene que poder mirar. */}
           <option value="CASTIGO">{TRAMO_LABELS.CASTIGO}</option>
         </NativeSelect>
+
+        {/* Solo si la cartera mezcla monedas: con una sola, el filtro no
+            filtra nada y ocupa lugar en una barra que ya tiene seis. */}
+        {monedas.length > 1 && (
+          <NativeSelect
+            aria-label="Moneda"
+            className="w-auto"
+            value={filters.currency}
+            onChange={(event) => setParam({ currency: event.target.value })}
+          >
+            <option value="">Toda moneda</option>
+            {monedas.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </NativeSelect>
+        )}
 
         {products.length > 0 && (
           <NativeSelect

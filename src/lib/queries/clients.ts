@@ -91,6 +91,8 @@ export type ClientFilters = {
   assigned?: string;
   tramo?: Tramo;
   product?: string;
+  /** Codigo ISO. Trae los deudores que tienen alguna deuda abierta en esa moneda. */
+  currency?: string;
 };
 
 export type ClientListResult = {
@@ -153,6 +155,17 @@ export async function getClients(
   }
   if (filters.tramo) {
     where.push(Prisma.sql`${TRAMO_DEL_CLIENTE} = ${filters.tramo}`);
+  }
+  if (filters.currency) {
+    // Solo las deudas abiertas: un deudor que termino de pagar su credito en
+    // dolares no es "un deudor en dolares" para quien arma la cartera de hoy.
+    where.push(Prisma.sql`EXISTS (
+      SELECT 1 FROM invoices im
+       WHERE im.client_id = c.id
+         AND im.organization_id = c.organization_id
+         AND im.currency = ${filters.currency}
+         AND im.status IN ('PENDING', 'PARTIAL')
+    )`);
   }
   if (filters.product) {
     // Igualdad y no ILIKE: el producto viene de un selector armado con los valores
@@ -258,6 +271,26 @@ export async function getProductOptions(organizationId: string): Promise<string[
   `;
 
   return rows.map((row) => row.product);
+}
+
+/**
+ * Las monedas en las que la organizacion tiene deuda abierta.
+ *
+ * Igual que con los productos, el selector se arma con lo que hay: una
+ * financiera que solo opera en guaranies no tiene por que ver el filtro lleno
+ * de monedas que nunca va a usar.
+ */
+export async function getCurrencyOptions(organizationId: string): Promise<string[]> {
+  const rows = await prisma.$queryRaw<{ currency: string }[]>`
+    SELECT DISTINCT currency
+      FROM invoices
+     WHERE organization_id = ${organizationId}::uuid
+       AND status IN ('PENDING', 'PARTIAL')
+     ORDER BY currency
+     LIMIT 20
+  `;
+
+  return rows.map((row) => row.currency);
 }
 
 export type SegmentRow = {

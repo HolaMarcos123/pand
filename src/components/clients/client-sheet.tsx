@@ -285,11 +285,12 @@ export function ClientSheet({
 
   return (
     <Sheet open={Boolean(clientId)} onOpenChange={(open) => !open && onClose()}>
-      {/* A pantalla completa y no un panel lateral: en la ficha de un deudor
-          con varias deudas, en dos monedas y con historial, el panel angosto
-          obligaba a scrollear para ver junto lo que hay que mirar junto. */}
+      {/* Centrado y acotado, no a pantalla completa: la ficha es una parada
+          corta sobre la lista y tapar todo hace perder de vista desde donde se
+          entro. Sigue siendo ancho porque adentro hay dos columnas —los datos
+          del deudor y el trabajo— que tienen que verse juntas. */}
       <SheetContent
-        side="full"
+        side="modal"
         className="flex w-full flex-col gap-0 overflow-hidden p-0"
       >
         {loading || !detail ? (
@@ -622,23 +623,20 @@ export function ClientSheet({
                 {cuotas.length === 0 ? (
                   <p className="mt-3 text-sm text-pand-gris">Sin cuotas cargadas.</p>
                 ) : (
-                  <div className="mt-3 space-y-5">
+                  <div className="mt-3 space-y-4">
                     {operaciones.map((operacion) => {
                       // Lo que es igual en toda la operación va en su encabezado
                       // y no en cada cuota. Lo que ya se mostró como dato del
                       // deudor no se repite acá.
                       const propiosDeLaOperacion = constantes(operacion.cuotas)
                         .datos.filter((p) => !etiquetasDelDeudor.has(p.label));
-                      const enElEncabezado = new Set([
-                        ...etiquetasDelDeudor,
-                        ...propiosDeLaOperacion.map((p) => p.label),
-                      ]);
 
                       return (
-                        <div key={operacion.loanNumber || "sin-operacion"}>
-                          {/* Con una sola operación el encabezado sigue sirviendo:
-                              es donde viven el producto y la moneda. */}
-                          <div className="rounded-t-lg border border-pand-border bg-pand-bg px-3 py-2">
+                        <div
+                          key={operacion.loanNumber || "sin-operacion"}
+                          className="overflow-hidden rounded-card border border-pand-border"
+                        >
+                          <div className="border-b border-pand-border bg-pand-bg px-3 py-2">
                             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                               {operacion.loanNumber ? (
                                 <span className="mono text-sm font-semibold text-pand-contorno">
@@ -669,7 +667,8 @@ export function ClientSheet({
                             </div>
 
                             {(propiosDeLaOperacion.length > 0 ||
-                              (operacion.portfolioName && detail.carteras.length > 1)) && (
+                              (operacion.portfolioName &&
+                                detail.carteras.length > 1)) && (
                               <p className="mt-1 flex flex-wrap gap-x-4 text-xs text-pand-gris">
                                 {propiosDeLaOperacion.map((p) => (
                                   <span key={p.label}>
@@ -679,130 +678,133 @@ export function ClientSheet({
                                     </span>
                                   </span>
                                 ))}
-                                {operacion.portfolioName && detail.carteras.length > 1 && (
-                                  <span>
-                                    Cartera:{" "}
-                                    <span className="font-semibold text-pand-contorno">
-                                      {operacion.portfolioName}
+                                {operacion.portfolioName &&
+                                  detail.carteras.length > 1 && (
+                                    <span>
+                                      Cartera:{" "}
+                                      <span className="font-semibold text-pand-contorno">
+                                        {operacion.portfolioName}
+                                      </span>
                                     </span>
-                                  </span>
-                                )}
+                                  )}
                               </p>
                             )}
                           </div>
 
-                          <div className="divide-y divide-pand-border rounded-b-lg border border-t-0 border-pand-border">
-                            {operacion.cuotas.map((invoice) => {
-                              const open =
-                                invoice.status === "PENDING" ||
-                                invoice.status === "PARTIAL";
-                              const overdue = open && invoice.daysOverdue > 0;
-                              const propios = invoice.propios.filter(
-                                (p) => !enElEncabezado.has(p.label),
-                              );
+                          {/* Tres columnas y nada más: cuota, cuándo vence y
+                              cuánto. Lo que trae la planilla por cuota —el
+                              tramo, el saldo— se repetía en las 48 líneas del
+                              crédito y tapaba justamente estas tres cosas. */}
+                          <table className="w-full table-fixed text-sm">
+                            <thead>
+                              <tr className="text-[11px] uppercase tracking-wider text-pand-gris">
+                                <th className="w-[22%] px-3 py-1.5 text-left font-medium">
+                                  Cuota
+                                </th>
+                                <th className="px-3 py-1.5 text-left font-medium">
+                                  Vencimiento
+                                </th>
+                                <th className="w-[38%] px-3 py-1.5 text-right font-medium">
+                                  Importe
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-pand-border">
+                              {operacion.cuotas.map((invoice) => {
+                                const open =
+                                  invoice.status === "PENDING" ||
+                                  invoice.status === "PARTIAL";
+                                const overdue = open && invoice.daysOverdue > 0;
 
-                              return (
-                                <div
-                                  key={invoice.id}
-                                  className="flex items-center justify-between gap-3 p-3"
-                                >
-                                  <div className="min-w-0">
-                                    <p className="mono text-sm font-medium">
+                                return (
+                                  <tr key={invoice.id} className="align-middle">
+                                    <td className="mono px-3 py-2 font-medium">
                                       {invoice.invoiceNumber}
-                                    </p>
-                                    {propios.length > 0 && (
-                                      <p className="truncate text-xs text-pand-gris">
-                                        {propios.map((p) => (
-                                          <span key={p.label} className="mr-3">
-                                            {p.label}:{" "}
-                                            <span className="font-semibold text-pand-contorno">
-                                              {p.valor}
-                                            </span>
-                                          </span>
-                                        ))}
-                                      </p>
-                                    )}
-                                    <p className="mono text-xs text-pand-gris">
-                                      vence {invoice.dueDate}
+                                    </td>
+                                    <td className="mono px-3 py-2 text-xs text-pand-gris">
+                                      {invoice.dueDate}
                                       {overdue && (
                                         <span className="ml-2 text-pand-coral">
                                           +{invoice.daysOverdue} d
                                         </span>
                                       )}
-                                    </p>
-                                  </div>
-                                  <div className="text-right">
-                                    {/* En la moneda de la cuota, no en la de la
-                                        organización: una cuota de USD 654 no es
-                                        Gs. 654, y mostrarla así la hace 7.000
-                                        veces más chica de lo que es. */}
-                                    <p
-                                      className={cn(
-                                        "mono text-sm",
-                                        overdue &&
-                                          invoice.daysOverdue > 90 &&
-                                          "text-pand-coral",
-                                      )}
-                                    >
-                                      {formatCurrency(
-                                        invoice.amount - invoice.paidAmount,
-                                        invoice.currency,
-                                      )}
-                                    </p>
-                                    <p
-                                      className={cn(
-                                        "text-xs",
-                                        INVOICE_STATUS_TONE[
-                                          invoice.status as InvoiceStatus
-                                        ],
-                                      )}
-                                    >
-                                      {INVOICE_STATUS_LABELS[
-                                        invoice.status as InvoiceStatus
-                                      ] ?? invoice.status}
-                                    </p>
-
-                                    {canChangeInvoiceStatus &&
-                                      invoice.status !== "PAID" && (
-                                        <NativeSelect
-                                          aria-label={`Estado de la cuota ${invoice.invoiceNumber}`}
-                                          className="mt-1 h-7 w-[150px] text-xs"
-                                          value=""
-                                          disabled={changingInvoice === invoice.id}
-                                          onChange={(event) => {
-                                            const next = event.target
-                                              .value as ManualInvoiceStatus;
-                                            if (!next) return;
-                                            cambiarEstado(invoice.id, next);
-                                          }}
+                                    </td>
+                                    <td className="px-3 py-2 text-right">
+                                      {/* En la moneda de la cuota, no en la de
+                                          la organización: una cuota de USD 654
+                                          mostrada como Gs. 654 queda 7.000
+                                          veces más chica de lo que es. */}
+                                      <p
+                                        className={cn(
+                                          "mono",
+                                          overdue &&
+                                            invoice.daysOverdue > 90 &&
+                                            "text-pand-coral",
+                                        )}
+                                      >
+                                        {formatCurrency(
+                                          invoice.amount - invoice.paidAmount,
+                                          invoice.currency,
+                                        )}
+                                      </p>
+                                      <div className="flex items-center justify-end gap-2">
+                                        <span
+                                          className={cn(
+                                            "text-xs",
+                                            INVOICE_STATUS_TONE[
+                                              invoice.status as InvoiceStatus
+                                            ],
+                                          )}
                                         >
-                                          <option value="">Cambiar estado…</option>
-                                          {MANUAL_INVOICE_STATUSES.filter(
-                                            (option) =>
-                                              option.value !== invoice.status &&
-                                              // "Volver a cartera" no tiene sentido si ya está.
-                                              !(
-                                                option.value === "PENDING" &&
-                                                esCarteraActiva(
-                                                  invoice.status as InvoiceStatus,
-                                                )
-                                              ),
-                                          ).map((option) => (
-                                            <option
-                                              key={option.value}
-                                              value={option.value}
-                                              title={option.hint}
+                                          {INVOICE_STATUS_LABELS[
+                                            invoice.status as InvoiceStatus
+                                          ] ?? invoice.status}
+                                        </span>
+                                        {canChangeInvoiceStatus &&
+                                          invoice.status !== "PAID" && (
+                                            <NativeSelect
+                                              aria-label={`Estado de la cuota ${invoice.invoiceNumber}`}
+                                              className="h-7 w-[132px] text-xs"
+                                              value=""
+                                              disabled={
+                                                changingInvoice === invoice.id
+                                              }
+                                              onChange={(event) => {
+                                                const next = event.target
+                                                  .value as ManualInvoiceStatus;
+                                                if (!next) return;
+                                                cambiarEstado(invoice.id, next);
+                                              }}
                                             >
-                                              {option.label}
-                                            </option>
-                                          ))}
-                                        </NativeSelect>
-                                      )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
+                                              <option value="">Cambiar…</option>
+                                              {MANUAL_INVOICE_STATUSES.filter(
+                                                (option) =>
+                                                  option.value !== invoice.status &&
+                                                  // "Volver a cartera" no tiene sentido si ya está.
+                                                  !(
+                                                    option.value === "PENDING" &&
+                                                    esCarteraActiva(
+                                                      invoice.status as InvoiceStatus,
+                                                    )
+                                                  ),
+                                              ).map((option) => (
+                                                <option
+                                                  key={option.value}
+                                                  value={option.value}
+                                                  title={option.hint}
+                                                >
+                                                  {option.label}
+                                                </option>
+                                              ))}
+                                            </NativeSelect>
+                                          )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
                       );
                     })}

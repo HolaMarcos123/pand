@@ -409,4 +409,18 @@ describe("depurarMapeoGuardado", () => {
       { campo: "loanNumber", columna: "CONTRATO", motivo: "viene vacía" },
     ]);
   });
+  /**
+   * El cuotero real trae el bien financiado en "DESC_PRODUCTO" y la marca en
+   * "MARCA". Sin el alias, la columna Producto de la lista de clientes salia
+   * con un guion en todas las filas.
+   */
+  it("mapea DESC_PRODUCTO al producto", () => {
+    const filas = [
+      { NRO_CLI: "CLI-1", DESC_PRODUCTO: "NVA110R", MARCA: "Honda" },
+      { NRO_CLI: "CLI-2", DESC_PRODUCTO: "POLO TRACK 1.0 MT", MARCA: "Volkswagen" },
+    ];
+    const mapeo = suggestMapping(["NRO_CLI", "DESC_PRODUCTO", "MARCA"], filas);
+
+    expect(mapeo.product).toBe("DESC_PRODUCTO");
+  });
 });

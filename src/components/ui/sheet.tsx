@@ -45,6 +45,12 @@ const sheetVariants = cva(
         // trabaja. Con un panel lateral angosto, la ficha de un deudor con
         // varias deudas obliga a scrollear para ver lo que hay que mirar junto.
         full: "inset-2 h-auto w-auto rounded-card data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:inset-4",
+        // Centrado y acotado. Es lo que corresponde cuando el panel es una
+        // parada corta sobre la lista: tapar la pantalla entera para ver una
+        // ficha hace perder de vista desde donde se entro. En telefono vuelve a
+        // ocupar todo, que es lo unico que entra.
+        modal:
+          "inset-2 h-auto w-auto rounded-card data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-[min(88vh,880px)] sm:w-[calc(100%-4rem)] sm:max-w-[1080px] sm:-translate-x-1/2 sm:-translate-y-1/2",
       },
     },
     defaultVariants: {

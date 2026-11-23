@@ -6,6 +6,7 @@ import { TRAMO_LABELS, type Tramo } from "@/lib/collections/tramos";
 import {
   getAssignableUsers,
   getClients,
+  getCurrencyOptions,
   getProductOptions,
   getSegments,
   type ClientFilters,
@@ -51,10 +52,16 @@ export default async function ClientsPage({
   // tramo nuevo queda filtrable sin tocar esta página.
   if (query.tramo && query.tramo in TRAMO_LABELS) filters.tramo = query.tramo as Tramo;
   if (query.product) filters.product = query.product.slice(0, 120);
+  // Codigo ISO y nada mas: el selector se arma con las monedas que existen, asi
+  // que cualquier otra cosa en la URL es ruido.
+  if (query.currency && /^[A-Z]{3}$/.test(query.currency)) {
+    filters.currency = query.currency;
+  }
 
   const page = Number.parseInt(query.page ?? "1", 10) || 1;
 
-  const [result, portfolios, operators, products, segments] = await Promise.all([
+  const [result, portfolios, operators, products, monedas, segments] =
+    await Promise.all([
     getClients(
       session.organization.id,
       session.user.id,
@@ -65,6 +72,7 @@ export default async function ClientsPage({
     getPortfolioOptions(session.organization.id),
     getAssignableUsers(session.organization.id),
     getProductOptions(session.organization.id),
+    getCurrencyOptions(session.organization.id),
     getSegments(session.organization.id),
   ]);
 
@@ -74,6 +82,7 @@ export default async function ClientsPage({
       portfolios={portfolios}
       operators={operators}
       products={products}
+      monedas={monedas}
       segments={segments}
       currency={session.organization.currency}
       // Repartir cartera es de admin y supervisor. El operador ve la pantalla, pero
@@ -90,6 +99,7 @@ export default async function ClientsPage({
         assigned: query.assigned ?? "",
         tramo: query.tramo ?? "",
         product: query.product ?? "",
+        currency: query.currency ?? "",
       }}
     />
   );
