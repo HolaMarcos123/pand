@@ -3,6 +3,7 @@
 import {
   Banknote,
   Loader2,
+  Mail,
   MessageCircle,
   Phone,
   Plus,
@@ -33,6 +34,7 @@ import {
   type ManualInvoiceStatus,
 } from "@/lib/collections/invoice-status";
 import { formatCurrency, formatNumber } from "@/lib/format";
+import { constantes, porOperacion } from "@/lib/clients/ficha";
 import type { ClientDetail } from "@/lib/queries/tasks";
 import {
   labelResultado,
@@ -157,6 +159,19 @@ export function ClientSheet({
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [clientId]);
 
+  /**
+   * Los datos que describen al deudor y no a cada cuota.
+   *
+   * Se deducen de las cuotas porque la planilla los trae ahí: el ERP exporta
+   * una fila por cuota con el teléfono y el cónyuge repetidos en todas.
+   */
+  const cuotas = detail?.invoices ?? [];
+  const { datos: datosDelDeudor, etiquetas: etiquetasDelDeudor } = constantes(cuotas);
+  const telefonos = [detail?.phone, detail?.phoneAlt].filter(
+    (t): t is string => Boolean(t),
+  );
+  const operaciones = porOperacion(cuotas);
+
   const tiposDisponibles = tiposCargables(tipificaciones);
   const availableResults = resultadosDe(tipificaciones, actionType);
   const isPromise = result === "PROMISE_PAY";
@@ -247,8 +262,23 @@ export function ClientSheet({
       }
 
       toast.success("Gestión guardada.");
+
       // Si quedó agendado para más adelante, sale de la bandeja de hoy.
       const leftInbox = Boolean(nextActionAt && nextActionAt > today());
+
+      // El historial se vuelve a traer del servidor: sin esto la gestión
+      // quedaba guardada pero la pantalla seguía mostrando el historial de
+      // antes, y el operador no tenía forma de saber si había entrado.
+      if (!leftInbox) await recargarFicha();
+
+      // El formulario se limpia porque la gestión ya es historia: dejarlo
+      // cargado invita a guardar dos veces la misma llamada.
+      setResult("");
+      setComment("");
+      setNextActionAt("");
+      setPromiseAmount("");
+      setPromiseDate("");
+
       onDone(clientId, leftInbox);
     });
   }
@@ -294,8 +324,12 @@ export function ClientSheet({
                   </p>
                 )}
 
+                {/* Todo lo que sirve para ubicar al deudor, junto y una sola
+                    vez. Los campos propios que valen lo mismo en todas sus
+                    cuotas —el tercer teléfono, el cónyuge, el barrio— entran
+                    acá: venían repitiéndose en cada una de las 48 cuotas. */}
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {[detail.phone, detail.phoneAlt].filter(Boolean).map((phone) => (
+                  {telefonos.map((phone) => (
                     <div key={phone} className="flex gap-1">
                       <a
                         href={`tel:${phone}`}
@@ -305,7 +339,7 @@ export function ClientSheet({
                         <span className="mono">{phone}</span>
                       </a>
                       <a
-                        href={`https://wa.me/${toWhatsappNumber(phone!)}`}
+                        href={`https://wa.me/${toWhatsappNumber(phone)}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         title="Abrir WhatsApp"
@@ -315,10 +349,34 @@ export function ClientSheet({
                       </a>
                     </div>
                   ))}
-                  {!detail.phone && !detail.phoneAlt && (
-                    <p className="text-xs text-pand-gris">Sin teléfonos cargados.</p>
+                  {detail.email && (
+                    <a
+                      href={`mailto:${detail.email}`}
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-pand-border px-2.5 py-1.5 text-xs font-semibold transition-colors hover:border-pand-azul hover:text-pand-azul"
+                    >
+                      <Mail className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{detail.email}</span>
+                    </a>
+                  )}
+                  {telefonos.length === 0 && !detail.email && (
+                    <p className="text-xs text-pand-gris">Sin datos de contacto.</p>
                   )}
                 </div>
+
+                {datosDelDeudor.length > 0 && (
+                  <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+                    {datosDelDeudor.map((dato) => (
+                      <div key={dato.label} className="min-w-0">
+                        <dt className="text-[11px] uppercase tracking-wider text-pand-gris">
+                          {dato.label}
+                        </dt>
+                        <dd className="truncate text-sm font-semibold text-pand-contorno">
+                          {dato.valor}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
 
                 {/* Un bloque por moneda. No se suman: un deudor con una prenda
                     en dólares y una tarjeta en guaraníes tiene dos deudas, y el
@@ -555,133 +613,195 @@ export function ClientSheet({
                 </Button>
               </section>
 
-              {/* ── B · Comprobantes ─────────────────────────── */}
+              {/* ── B · Cuotas, agrupadas por operación ───────── */}
               <section className="border-b border-pand-border p-6">
                 <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
-                  Comprobantes
+                  Cuotas
                 </p>
 
-                {detail.invoices.length === 0 ? (
-                  <p className="mt-3 text-sm text-pand-gris">Sin comprobantes.</p>
+                {cuotas.length === 0 ? (
+                  <p className="mt-3 text-sm text-pand-gris">Sin cuotas cargadas.</p>
                 ) : (
-                  <div className="mt-3 space-y-2">
-                    {detail.invoices.map((invoice) => {
-                      const open =
-                        invoice.status === "PENDING" || invoice.status === "PARTIAL";
-                      const overdue = open && invoice.daysOverdue > 0;
+                  <div className="mt-3 space-y-5">
+                    {operaciones.map((operacion) => {
+                      // Lo que es igual en toda la operación va en su encabezado
+                      // y no en cada cuota. Lo que ya se mostró como dato del
+                      // deudor no se repite acá.
+                      const propiosDeLaOperacion = constantes(operacion.cuotas)
+                        .datos.filter((p) => !etiquetasDelDeudor.has(p.label));
+                      const enElEncabezado = new Set([
+                        ...etiquetasDelDeudor,
+                        ...propiosDeLaOperacion.map((p) => p.label),
+                      ]);
 
                       return (
-                        <div
-                          key={invoice.id}
-                          className="flex items-center justify-between gap-3 rounded-lg border border-pand-border p-3"
-                        >
-                          <div className="min-w-0">
-                            <p className="mono text-sm font-medium">
-                              {/* La operación va delante del número de cuota y
-                                  solo cuando el deudor tiene más de un crédito:
-                                  con tres operaciones de 60 cuotas, "1/60" sin
-                                  decir de cuál no le sirve a nadie. */}
-                              {invoice.loanNumber && detail.operaciones.length > 1 && (
-                                <span className="text-pand-gris">
-                                  {invoice.loanNumber}
-                                  <span className="mx-1">·</span>
+                        <div key={operacion.loanNumber || "sin-operacion"}>
+                          {/* Con una sola operación el encabezado sigue sirviendo:
+                              es donde viven el producto y la moneda. */}
+                          <div className="rounded-t-lg border border-pand-border bg-pand-bg px-3 py-2">
+                            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                              {operacion.loanNumber ? (
+                                <span className="mono text-sm font-semibold text-pand-contorno">
+                                  {operacion.loanNumber}
+                                </span>
+                              ) : (
+                                <span className="text-sm font-semibold text-pand-gris">
+                                  Sin número de operación
                                 </span>
                               )}
-                              {invoice.invoiceNumber}
-                            </p>
-                            {(invoice.product || invoice.portfolioName) && (
-                              <p className="truncate text-xs text-pand-contorno">
-                                {invoice.product && (
-                                  <span className="font-semibold">{invoice.product}</span>
-                                )}
-                                {/* La cartera solo cuando el deudor debe en más
-                                    de una: con una sola es ruido repetido en
-                                    cada fila. */}
-                                {invoice.portfolioName && detail.carteras.length > 1 && (
-                                  <span className="ml-2 rounded-badge bg-pand-bg px-1.5 py-0.5 text-[10px] font-semibold text-pand-gris">
-                                    {invoice.portfolioName}
-                                  </span>
-                                )}
-                              </p>
-                            )}
-                            {/* Los campos propios de la organización: la
-                                sucursal, el auxiliar de cobranza, lo que la
-                                financiera haya declarado en Config. */}
-                            {invoice.propios.length > 0 && (
-                              <p className="truncate text-xs text-pand-gris">
-                                {invoice.propios.map((p) => (
-                                  <span key={p.label} className="mr-3">
+                              {operacion.product && (
+                                <span className="text-xs font-semibold text-pand-contorno">
+                                  {operacion.product}
+                                </span>
+                              )}
+                              {operacion.monedas.map((moneda) => (
+                                <span
+                                  key={moneda}
+                                  className="mono rounded-badge bg-white px-1.5 py-0.5 text-[10px] text-pand-gris"
+                                >
+                                  {moneda}
+                                </span>
+                              ))}
+                              <span className="ml-auto text-xs text-pand-gris">
+                                {formatNumber(operacion.cuotas.length)}{" "}
+                                {operacion.cuotas.length === 1 ? "cuota" : "cuotas"}
+                              </span>
+                            </div>
+
+                            {(propiosDeLaOperacion.length > 0 ||
+                              (operacion.portfolioName && detail.carteras.length > 1)) && (
+                              <p className="mt-1 flex flex-wrap gap-x-4 text-xs text-pand-gris">
+                                {propiosDeLaOperacion.map((p) => (
+                                  <span key={p.label}>
                                     {p.label}:{" "}
                                     <span className="font-semibold text-pand-contorno">
                                       {p.valor}
                                     </span>
                                   </span>
                                 ))}
+                                {operacion.portfolioName && detail.carteras.length > 1 && (
+                                  <span>
+                                    Cartera:{" "}
+                                    <span className="font-semibold text-pand-contorno">
+                                      {operacion.portfolioName}
+                                    </span>
+                                  </span>
+                                )}
                               </p>
                             )}
-                            <p className="mono text-xs text-pand-gris">
-                              vence {invoice.dueDate}
-                              {overdue && (
-                                <span className="ml-2 text-pand-coral">
-                                  +{invoice.daysOverdue} d
-                                </span>
-                              )}
-                            </p>
                           </div>
-                          <div className="text-right">
-                            <p
-                              className={cn(
-                                "mono text-sm",
-                                overdue && invoice.daysOverdue > 90 && "text-pand-coral",
-                              )}
-                            >
-                              {formatCurrency(
-                                invoice.amount - invoice.paidAmount,
-                                currency,
-                              )}
-                            </p>
-                            <p
-                              className={cn(
-                                "text-xs",
-                                INVOICE_STATUS_TONE[invoice.status as InvoiceStatus],
-                              )}
-                            >
-                              {INVOICE_STATUS_LABELS[invoice.status as InvoiceStatus] ??
-                                invoice.status}
-                            </p>
 
-                            {canChangeInvoiceStatus && invoice.status !== "PAID" && (
-                              <NativeSelect
-                                aria-label={`Estado de ${invoice.invoiceNumber}`}
-                                className="mt-1 h-7 w-[150px] text-xs"
-                                value=""
-                                disabled={changingInvoice === invoice.id}
-                                onChange={(event) => {
-                                  const next = event.target.value as ManualInvoiceStatus;
-                                  if (!next) return;
-                                  cambiarEstado(invoice.id, next);
-                                }}
-                              >
-                                <option value="">Cambiar estado…</option>
-                                {MANUAL_INVOICE_STATUSES.filter(
-                                  (option) =>
-                                    option.value !== invoice.status &&
-                                    // "Volver a cartera" no tiene sentido si ya está.
-                                    !(
-                                      option.value === "PENDING" &&
-                                      esCarteraActiva(invoice.status as InvoiceStatus)
-                                    ),
-                                ).map((option) => (
-                                  <option
-                                    key={option.value}
-                                    value={option.value}
-                                    title={option.hint}
-                                  >
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </NativeSelect>
-                            )}
+                          <div className="divide-y divide-pand-border rounded-b-lg border border-t-0 border-pand-border">
+                            {operacion.cuotas.map((invoice) => {
+                              const open =
+                                invoice.status === "PENDING" ||
+                                invoice.status === "PARTIAL";
+                              const overdue = open && invoice.daysOverdue > 0;
+                              const propios = invoice.propios.filter(
+                                (p) => !enElEncabezado.has(p.label),
+                              );
+
+                              return (
+                                <div
+                                  key={invoice.id}
+                                  className="flex items-center justify-between gap-3 p-3"
+                                >
+                                  <div className="min-w-0">
+                                    <p className="mono text-sm font-medium">
+                                      {invoice.invoiceNumber}
+                                    </p>
+                                    {propios.length > 0 && (
+                                      <p className="truncate text-xs text-pand-gris">
+                                        {propios.map((p) => (
+                                          <span key={p.label} className="mr-3">
+                                            {p.label}:{" "}
+                                            <span className="font-semibold text-pand-contorno">
+                                              {p.valor}
+                                            </span>
+                                          </span>
+                                        ))}
+                                      </p>
+                                    )}
+                                    <p className="mono text-xs text-pand-gris">
+                                      vence {invoice.dueDate}
+                                      {overdue && (
+                                        <span className="ml-2 text-pand-coral">
+                                          +{invoice.daysOverdue} d
+                                        </span>
+                                      )}
+                                    </p>
+                                  </div>
+                                  <div className="text-right">
+                                    {/* En la moneda de la cuota, no en la de la
+                                        organización: una cuota de USD 654 no es
+                                        Gs. 654, y mostrarla así la hace 7.000
+                                        veces más chica de lo que es. */}
+                                    <p
+                                      className={cn(
+                                        "mono text-sm",
+                                        overdue &&
+                                          invoice.daysOverdue > 90 &&
+                                          "text-pand-coral",
+                                      )}
+                                    >
+                                      {formatCurrency(
+                                        invoice.amount - invoice.paidAmount,
+                                        invoice.currency,
+                                      )}
+                                    </p>
+                                    <p
+                                      className={cn(
+                                        "text-xs",
+                                        INVOICE_STATUS_TONE[
+                                          invoice.status as InvoiceStatus
+                                        ],
+                                      )}
+                                    >
+                                      {INVOICE_STATUS_LABELS[
+                                        invoice.status as InvoiceStatus
+                                      ] ?? invoice.status}
+                                    </p>
+
+                                    {canChangeInvoiceStatus &&
+                                      invoice.status !== "PAID" && (
+                                        <NativeSelect
+                                          aria-label={`Estado de la cuota ${invoice.invoiceNumber}`}
+                                          className="mt-1 h-7 w-[150px] text-xs"
+                                          value=""
+                                          disabled={changingInvoice === invoice.id}
+                                          onChange={(event) => {
+                                            const next = event.target
+                                              .value as ManualInvoiceStatus;
+                                            if (!next) return;
+                                            cambiarEstado(invoice.id, next);
+                                          }}
+                                        >
+                                          <option value="">Cambiar estado…</option>
+                                          {MANUAL_INVOICE_STATUSES.filter(
+                                            (option) =>
+                                              option.value !== invoice.status &&
+                                              // "Volver a cartera" no tiene sentido si ya está.
+                                              !(
+                                                option.value === "PENDING" &&
+                                                esCarteraActiva(
+                                                  invoice.status as InvoiceStatus,
+                                                )
+                                              ),
+                                          ).map((option) => (
+                                            <option
+                                              key={option.value}
+                                              value={option.value}
+                                              title={option.hint}
+                                            >
+                                              {option.label}
+                                            </option>
+                                          ))}
+                                        </NativeSelect>
+                                      )}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       );
