@@ -4,6 +4,8 @@ import {
   BASE_DIAS,
   INTERES_POR_DEFECTO,
   calculaInteres,
+  tasaDe,
+  type ConfigInteres,
   interesAcumulado,
   interesPorDia,
 } from "@/lib/collections/intereses";
@@ -18,7 +20,7 @@ import { resolverSettings } from "@/lib/config/settings";
  * se convierte en una cifra dicha en voz alta que después hay que desdecir.
  */
 
-const TASA = { tasaMensual: 4.5 };
+const TASA = { tasaMensual: 4.5, porMoneda: {} };
 
 describe("interesAcumulado", () => {
   it("interés simple: tasa mensual repartida en 30 días", () => {
@@ -44,7 +46,7 @@ describe("interesAcumulado", () => {
   });
 
   it("sin tasa configurada no hay interés", () => {
-    expect(interesAcumulado(1_000_000, 90, { tasaMensual: 0 })).toBe(0);
+    expect(interesAcumulado(1_000_000, 90, { tasaMensual: 0, porMoneda: {} })).toBe(0);
     expect(interesAcumulado(1_000_000, 90, INTERES_POR_DEFECTO)).toBe(0);
   });
 
@@ -61,7 +63,7 @@ describe("interesAcumulado", () => {
       expect(Number.isNaN(interesAcumulado(valor, 30, TASA))).toBe(false);
       expect(Number.isNaN(interesAcumulado(1_000_000, valor, TASA))).toBe(false);
       expect(
-        Number.isNaN(interesAcumulado(1_000_000, 30, { tasaMensual: valor })),
+        Number.isNaN(interesAcumulado(1_000_000, 30, { tasaMensual: valor, porMoneda: {} })),
       ).toBe(false);
     }
   });
@@ -78,15 +80,15 @@ describe("interesPorDia", () => {
   it("la base son 30 días, no el mes calendario", () => {
     // Si fuera el mes calendario, el interés diario cambiaría entre febrero y
     // marzo sobre la misma deuda, y el deudor lo notaría.
-    expect(interesPorDia(BASE_DIAS * 1000, { tasaMensual: 100 })).toBeCloseTo(1000, 6);
+    expect(interesPorDia(BASE_DIAS * 1000, { tasaMensual: 100, porMoneda: {} })).toBeCloseTo(1000, 6);
   });
 });
 
 describe("calculaInteres", () => {
   it("decide si la UI dibuja la columna", () => {
-    expect(calculaInteres({ tasaMensual: 4.5 })).toBe(true);
-    expect(calculaInteres({ tasaMensual: 0 })).toBe(false);
-    expect(calculaInteres({ tasaMensual: NaN })).toBe(false);
+    expect(calculaInteres({ tasaMensual: 4.5, porMoneda: {} })).toBe(true);
+    expect(calculaInteres({ tasaMensual: 0, porMoneda: {} })).toBe(false);
+    expect(calculaInteres({ tasaMensual: NaN, porMoneda: {} })).toBe(false);
   });
 });
 
@@ -100,16 +102,66 @@ describe("la tasa en la configuración", () => {
 
   it("se lee la tasa guardada", () => {
     expect(
-      resolverSettings({ cobranza: { tasaMensual: 3.75 } }).cobranza.tasaMensual,
+      resolverSettings({ cobranza: { tasaMensual: 3.75, porMoneda: {} } }).cobranza.tasaMensual,
     ).toBe(3.75);
   });
 
   it("una tasa imposible se descarta y queda en cero", () => {
     for (const valor of [-5, 450, "mucho", null]) {
       expect(
-        resolverSettings({ cobranza: { tasaMensual: valor } }).cobranza.tasaMensual,
+        resolverSettings({ cobranza: { tasaMensual: valor, porMoneda: {} } }).cobranza.tasaMensual,
         `con ${JSON.stringify(valor)}`,
       ).toBe(0);
     }
+  });
+});
+
+describe("tasa por moneda", () => {
+  /**
+   * El caso que lo motiva: 4,5 % mensual es corriente en guaranies y
+   * disparatado en dolares. Con una sola tasa, la ficha de un deudor con
+   * prenda en dolares mostraba un interes que el operador no podia decir.
+   */
+  const MIXTA: ConfigInteres = { tasaMensual: 4.5, porMoneda: { USD: 1.2 } };
+
+  it("la moneda con tasa propia usa la suya", () => {
+    expect(tasaDe(MIXTA, "USD")).toBe(1.2);
+    expect(interesAcumulado(1_000, 30, MIXTA, "USD")).toBeCloseTo(12, 6);
+  });
+
+  it("la moneda sin tasa propia usa la general", () => {
+    expect(tasaDe(MIXTA, "PYG")).toBe(4.5);
+    expect(interesAcumulado(1_000_000, 30, MIXTA, "PYG")).toBeCloseTo(45_000, 6);
+  });
+
+  it("sin moneda devuelve la general", () => {
+    expect(tasaDe(MIXTA)).toBe(4.5);
+  });
+
+  it("una moneda puede tener tasa cero con la general encendida", () => {
+    const config: ConfigInteres = { tasaMensual: 4.5, porMoneda: { USD: 0 } };
+
+    expect(interesAcumulado(1_000, 90, config, "USD")).toBe(0);
+    expect(calculaInteres(config, "USD")).toBe(false);
+    expect(calculaInteres(config, "PYG")).toBe(true);
+  });
+
+  it("una moneda puede tener tasa con la general apagada", () => {
+    const config: ConfigInteres = { tasaMensual: 0, porMoneda: { USD: 1.2 } };
+
+    // Sin moneda, la pregunta es por la organizacion entera: hay algo que mostrar.
+    expect(calculaInteres(config)).toBe(true);
+    expect(calculaInteres(config, "PYG")).toBe(false);
+    expect(interesPorDia(1_000, config, "USD")).toBeCloseTo(0.4, 6);
+  });
+
+  it("una tasa rota en una moneda cae en la general, no en NaN", () => {
+    const config = {
+      tasaMensual: 4.5,
+      porMoneda: { USD: Number.NaN },
+    } as ConfigInteres;
+
+    expect(Number.isNaN(interesAcumulado(1_000, 30, config, "USD"))).toBe(false);
+    expect(interesAcumulado(1_000, 30, config, "USD")).toBe(0);
   });
 });

@@ -170,6 +170,14 @@ export const settingsGuardadosSchema = z.object({
       // escribir 450 donde iba 4,50 convierte la ficha de un deudor en ciencia
       // ficción y nadie lo nota hasta que un cliente lo reclama.
       tasaMensual: z.number().min(0).max(100).optional(),
+      // Tasa por moneda ISO. La clave se valida con el mismo catalogo que el
+      // resto del producto: una moneda inventada no tiene donde mostrarse.
+      porMoneda: z
+        .partialRecord(
+          z.enum(MONEDAS.map((m) => m.value) as [string, ...string[]]),
+          z.number().min(0).max(100),
+        )
+        .optional(),
     })
     .optional(),
 });
@@ -213,6 +221,13 @@ export function resolverSettings(raw: unknown): Settings {
     cobranza: {
       tasaMensual:
         guardado.cobranza?.tasaMensual ?? INTERES_POR_DEFECTO.tasaMensual,
+      // Sin tasa propia, la moneda usa la general. Guardar la general como
+      // tasa de cada moneda seria peor: cambiarla despues no se propagaria.
+      porMoneda: Object.fromEntries(
+        Object.entries(guardado.cobranza?.porMoneda ?? {}).filter(
+          ([, tasa]) => typeof tasa === "number",
+        ),
+      ) as Record<string, number>,
     },
   };
 }

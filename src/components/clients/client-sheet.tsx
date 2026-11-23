@@ -388,10 +388,13 @@ export function ClientSheet({
                     ? detail.saldos
                     : [{ currency, total: detail.totalDebt, delMes: 0, diasMora: detail.daysOverdue }]
                   ).map((saldo) => {
+                    // Con la tasa de SU moneda: una prenda en dolares no
+                    // devenga al mismo porcentaje que un credito en guaranies.
                     const interes = interesAcumulado(
                       saldo.total,
                       saldo.diasMora,
                       cobranza,
+                      saldo.currency,
                     );
 
                     return (
@@ -433,7 +436,7 @@ export function ClientSheet({
                             </dd>
                           </div>
 
-                          {calculaInteres(cobranza) && interes > 0 && (
+                          {calculaInteres(cobranza, saldo.currency) && interes > 0 && (
                             <div>
                               <dt className="text-xs text-pand-gris">
                                 Interés estimado
@@ -443,7 +446,11 @@ export function ClientSheet({
                               </dd>
                               <dd className="mt-0.5 text-[11px] text-pand-gris">
                                 {formatCurrency(
-                                  interesPorDia(saldo.total, cobranza),
+                                  interesPorDia(
+                                    saldo.total,
+                                    cobranza,
+                                    saldo.currency,
+                                  ),
                                   saldo.currency,
                                 )}{" "}
                                 por día

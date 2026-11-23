@@ -20,11 +20,35 @@
 export const BASE_DIAS = 30;
 
 export type ConfigInteres = {
-  /** Tasa mensual en porcentaje. 0 apaga el cálculo en toda la aplicación. */
+  /**
+   * Tasa mensual en porcentaje para las monedas que no tienen la suya.
+   * 0 apaga el cálculo para esas monedas.
+   */
   tasaMensual: number;
+  /**
+   * Tasa mensual por moneda ISO, cuando difiere de la general.
+   *
+   * Existe porque nadie cobra lo mismo en guaraníes que en dólares: una mora
+   * del 4,5 % mensual es normal en PYG y disparatada en USD. Con una sola tasa,
+   * la ficha de un deudor con prenda en dólares mostraba un interés que el
+   * operador no podía decir en voz alta.
+   */
+  porMoneda: Record<string, number>;
 };
 
-export const INTERES_POR_DEFECTO: ConfigInteres = { tasaMensual: 0 };
+export const INTERES_POR_DEFECTO: ConfigInteres = { tasaMensual: 0, porMoneda: {} };
+
+/**
+ * La tasa que corresponde a una moneda: la suya si la tiene, la general si no.
+ *
+ * Sin moneda devuelve la general, que es lo correcto para un saldo del que no
+ * se sabe en qué está.
+ */
+export function tasaDe(config: ConfigInteres, moneda?: string): number {
+  const propia = moneda ? config.porMoneda?.[moneda] : undefined;
+  const tasa = propia ?? config.tasaMensual;
+  return Number.isFinite(tasa) && tasa > 0 ? tasa : 0;
+}
 
 /**
  * Interés acumulado sobre un saldo.
@@ -37,24 +61,43 @@ export function interesAcumulado(
   saldo: number,
   diasDeMora: number,
   config: ConfigInteres,
+  moneda?: string,
 ): number {
   if (!Number.isFinite(saldo) || saldo <= 0) return 0;
   if (!Number.isFinite(diasDeMora) || diasDeMora <= 0) return 0;
-  if (!Number.isFinite(config.tasaMensual) || config.tasaMensual <= 0) return 0;
 
-  const tasaDiaria = config.tasaMensual / 100 / BASE_DIAS;
+  const tasa = tasaDe(config, moneda);
+  if (tasa <= 0) return 0;
+
+  const tasaDiaria = tasa / 100 / BASE_DIAS;
   return saldo * tasaDiaria * diasDeMora;
 }
 
 /** Lo que corre por día sobre ese saldo, para poder decir "cada día que pasa, X". */
-export function interesPorDia(saldo: number, config: ConfigInteres): number {
+export function interesPorDia(
+  saldo: number,
+  config: ConfigInteres,
+  moneda?: string,
+): number {
   if (!Number.isFinite(saldo) || saldo <= 0) return 0;
-  if (!Number.isFinite(config.tasaMensual) || config.tasaMensual <= 0) return 0;
 
-  return (saldo * (config.tasaMensual / 100)) / BASE_DIAS;
+  const tasa = tasaDe(config, moneda);
+  if (tasa <= 0) return 0;
+
+  return (saldo * (tasa / 100)) / BASE_DIAS;
 }
 
-/** Si hay algo que mostrar. Con tasa en cero, la UI no dibuja la columna. */
-export function calculaInteres(config: ConfigInteres): boolean {
-  return Number.isFinite(config.tasaMensual) && config.tasaMensual > 0;
+/**
+ * Si hay algo que mostrar. Con tasa en cero, la UI no dibuja la columna.
+ *
+ * Sin moneda pregunta por la organización entera: alcanza con que alguna
+ * moneda tenga tasa.
+ */
+export function calculaInteres(config: ConfigInteres, moneda?: string): boolean {
+  if (moneda) return tasaDe(config, moneda) > 0;
+
+  return (
+    tasaDe(config) > 0 ||
+    Object.values(config.porMoneda ?? {}).some((t) => Number.isFinite(t) && t > 0)
+  );
 }

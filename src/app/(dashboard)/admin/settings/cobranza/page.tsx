@@ -30,5 +30,5 @@ export default async function CobranzaPage() {
 
   const { cobranza, currency } = resolverSettings(organizacion.settings);
 
-  return <CobranzaForm tasaMensual={cobranza.tasaMensual} currency={currency} />;
+  return <CobranzaForm cobranza={cobranza} currency={currency} />;
 }

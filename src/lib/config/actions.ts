@@ -144,6 +144,13 @@ export async function saveTipificaciones(
 
 const cobranzaSchema = z.object({
   tasaMensual: z.number().min(0).max(100),
+  /** Tasa propia por moneda ISO. La que no esta usa la general. */
+  porMoneda: z
+    .partialRecord(
+      z.enum(MONEDAS.map((m) => m.value) as [string, ...string[]]),
+      z.number().min(0).max(100),
+    )
+    .optional(),
 });
 
 /**
@@ -170,7 +177,10 @@ export async function saveCobranza(
   }
 
   await mergeSettings(session.organization.id, {
-    cobranza: { tasaMensual: parsed.data.tasaMensual },
+    cobranza: {
+      tasaMensual: parsed.data.tasaMensual,
+      porMoneda: parsed.data.porMoneda ?? {},
+    },
   });
 
   revalidatePath("/tasks");
