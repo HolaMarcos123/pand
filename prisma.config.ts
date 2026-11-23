@@ -1,9 +1,22 @@
 import { config as loadEnv } from "dotenv";
 import { defineConfig } from "prisma/config";
 
-// Unica fuente de verdad para secretos: .env.local (gitignorado).
-// Ojo: `import "dotenv/config"` cargaria .env, no .env.local — de ahi el path explicito.
-loadEnv({ path: ".env.local" });
+// .env.local es DESARROLLO y es lo que se usa siempre, salvo que alguien pida
+// produccion a proposito con PAND_DB=prod. Que haya que escribirlo es el punto:
+// una migracion contra la base de los clientes no puede salir de un descuido.
+//
+//   $env:PAND_DB='prod'; npx prisma migrate deploy
+//
+// Ojo: `import "dotenv/config"` cargaria .env, no .env.local — de ahi el path
+// explicito.
+const archivo =
+  process.env.PAND_DB === "prod" ? ".env.production.local" : ".env.local";
+
+loadEnv({ path: archivo });
+
+if (process.env.PAND_DB === "prod") {
+  console.warn("\n  ⚠ PAND_DB=prod: esto apunta a la base de PRODUCCION.\n");
+}
 
 export default defineConfig({
   schema: "prisma/schema.prisma",

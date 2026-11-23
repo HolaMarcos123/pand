@@ -41,3 +41,11 @@ next-env.d.ts
 
 # Config del dev server local (rutas de cada maquina)
 .claude/launch.json
+
+# Carpeta del CLI de Vercel: guarda el id del proyecto de esta maquina.
+.vercel
+
+# Lo agrego `vercel link`. Va despues del `!.env.example` de mas arriba, asi que
+# lo volvia a ignorar: el ejemplo es justamente lo unico que SI va al repo.
+.env*
+!.env.example
