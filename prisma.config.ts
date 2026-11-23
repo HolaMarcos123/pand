@@ -5,7 +5,7 @@ import { defineConfig } from "prisma/config";
 // produccion a proposito con PAND_DB=prod. Que haya que escribirlo es el punto:
 // una migracion contra la base de los clientes no puede salir de un descuido.
 //
-//   $env:PAND_DB='prod'; npx prisma migrate deploy
+//   npm.cmd run db:deploy:prod   (scripts/migrar-produccion.mjs lo pone)
 //
 // Ojo: `import "dotenv/config"` cargaria .env, no .env.local — de ahi el path
 // explicito.

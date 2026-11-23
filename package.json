@@ -12,7 +12,8 @@
     "postinstall": "prisma generate",
     "seed": "tsx prisma/seed.ts",
     "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "db:deploy:prod": "node scripts/migrar-produccion.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
