@@ -326,6 +326,12 @@ model ManagementAction {
   operatorId     String?       @map("operator_id") @db.Uuid
   actionType     ActionType    @map("action_type")
   result         ActionResult?
+  // Que tipificacion de la organizacion se eligio, cuando no es una de fabrica.
+  // El enum de arriba guarda el SIGNIFICADO (de ahi salen los reportes) y esto
+  // guarda el NOMBRE que eligio la organizacion. Ver la migracion
+  // 20261123100000_tipificaciones_propias.
+  typeCode       String?       @map("type_code")
+  resultCode     String?       @map("result_code")
   comment        String?
   nextActionAt   DateTime?     @map("next_action_at") @db.Timestamptz(6)
   promiseAmount  Decimal?      @map("promise_amount") @db.Decimal(18, 2)

@@ -12,7 +12,9 @@ import {
   ZONAS_HORARIAS,
   idDeCampo,
   resolverSettings,
+  resolverTipificaciones,
   settingsGuardadosSchema,
+  tiposCargables,
   type CampoPropio,
   type SettingsGuardados,
   type TipoDeCampo,
@@ -119,13 +121,50 @@ export async function saveTipificaciones(
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
   }
 
-  const activos = Object.values(parsed.data.tipificaciones.tipos ?? {}).filter(
-    (t) => t?.activo !== false,
-  );
-  if (activos.length === 0) {
+  // Se valida contra la configuración RESUELTA y no contra lo que llegó. Es la
+  // diferencia entre "mandó algún tipo activo" y "al operador le va a quedar algo
+  // para elegir": un tipo activo al que le apagaron todos los resultados no sirve,
+  // y un tipo propio activo sí cuenta aunque no esté en `tipos`.
+  const resuelta = resolverTipificaciones(parsed.data.tipificaciones);
+  const cargables = tiposCargables(resuelta);
+
+  if (cargables.length === 0) {
     return {
       ok: false,
-      error: "Dejá al menos un tipo de gestión activo: sin ninguno, el operador no puede registrar nada.",
+      error:
+        "Dejá al menos un tipo de gestión activo y con un resultado: sin eso, el operador no puede registrar nada.",
+    };
+  }
+
+  // Dos tipificaciones con el mismo nombre son indistinguibles en el selector, y
+  // después nadie sabe por qué el reporte reparte las gestiones entre dos filas
+  // que se llaman igual. Se compara sin mayusculas ni espacios de sobra porque
+  // "No contesta" y "no contesta " son el mismo nombre para quien lo lee.
+  const duplicado = (nombres: string[]): string | null => {
+    const vistos = new Set<string>();
+    for (const nombre of nombres) {
+      const clave = nombre.trim().toLowerCase();
+      if (vistos.has(clave)) return nombre.trim();
+      vistos.add(clave);
+    }
+    return null;
+  };
+
+  const tipoRepetido = duplicado(
+    resuelta.tipos.filter((t) => t.activo).map((t) => t.label),
+  );
+  if (tipoRepetido) {
+    return {
+      ok: false,
+      error: `Ya hay un tipo de gestión que se llama "${tipoRepetido}". Ponele otro nombre.`,
+    };
+  }
+
+  const resultadoRepetido = duplicado(resuelta.resultados.map((r) => r.label));
+  if (resultadoRepetido) {
+    return {
+      ok: false,
+      error: `Ya hay un resultado que se llama "${resultadoRepetido}". Ponele otro nombre.`,
     };
   }
 

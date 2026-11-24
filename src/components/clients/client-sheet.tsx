@@ -37,9 +37,10 @@ import { formatCurrency, formatNumber } from "@/lib/format";
 import { constantes, porOperacion } from "@/lib/clients/ficha";
 import type { ClientDetail } from "@/lib/queries/tasks";
 import {
+  baseDeResultado,
   labelResultado,
   labelTipo,
-  resultadosDe,
+  resultadosConfigDe,
   tiposCargables,
   type Tipificaciones,
 } from "@/lib/config/settings";
@@ -51,12 +52,7 @@ import {
   setInvoiceStatus,
 } from "@/lib/tasks/actions";
 import { cn } from "@/lib/utils";
-import type {
-  ActionResult,
-  ActionType,
-  ClientPriority,
-  InvoiceStatus,
-} from "@/generated/prisma/enums";
+import type { ClientPriority, InvoiceStatus } from "@/generated/prisma/enums";
 
 import { PaymentDialog } from "./payment-dialog";
 
@@ -119,10 +115,13 @@ export function ClientSheet({
   const [elegidas, setElegidas] = useState<Set<string>>(() => new Set());
 
   // Formulario de gestión
-  const [actionType, setActionType] = useState<ActionType>(
+  // Códigos de tipificación, no el enum: pueden ser "CALL" o "carta_documento",
+  // según si la organización usa la de fábrica o una propia. El enum que se guarda
+  // en la base lo resuelve el server action a partir de este código.
+  const [actionType, setActionType] = useState<string>(
     () => tiposCargables(tipificaciones)[0]?.tipo ?? "NOTE",
   );
-  const [result, setResult] = useState<ActionResult | "">("");
+  const [result, setResult] = useState<string>("");
   const [comment, setComment] = useState("");
   const [nextActionAt, setNextActionAt] = useState("");
   const [promiseAmount, setPromiseAmount] = useState("");
@@ -248,8 +247,11 @@ export function ClientSheet({
   }
 
   const tiposDisponibles = tiposCargables(tipificaciones);
-  const availableResults = resultadosDe(tipificaciones, actionType);
-  const isPromise = result === "PROMISE_PAY";
+  const availableResults = resultadosConfigDe(tipificaciones, actionType);
+  // Por el significado y no por el código: una organización puede llamar
+  // "Acordó refinanciar" a un resultado que hereda de PROMESA, y eso también
+  // necesita monto y fecha.
+  const isPromise = baseDeResultado(tipificaciones, result) === "PROMISE_PAY";
 
   function cambiarEstado(invoiceId: string, status: ManualInvoiceStatus) {
     setChangingInvoice(invoiceId);
@@ -1121,7 +1123,7 @@ export function ClientSheet({
                     id="action-type"
                     value={actionType}
                     onChange={(event) => {
-                      setActionType(event.target.value as ActionType);
+                      setActionType(event.target.value);
                       // El resultado anterior puede no existir para el tipo nuevo.
                       setResult("");
                     }}
@@ -1142,16 +1144,14 @@ export function ClientSheet({
                     id="action-result"
                     value={result}
                     disabled={availableResults.length === 0}
-                    onChange={(event) =>
-                      setResult(event.target.value as ActionResult | "")
-                    }
+                    onChange={(event) => setResult(event.target.value)}
                   >
                     <option value="">
                       {availableResults.length === 0 ? "No aplica" : "— elegir —"}
                     </option>
                     {availableResults.map((option) => (
-                      <option key={option} value={option}>
-                        {labelResultado(tipificaciones, option)}
+                      <option key={option.codigo} value={option.codigo}>
+                        {option.label}
                       </option>
                     ))}
                   </NativeSelect>

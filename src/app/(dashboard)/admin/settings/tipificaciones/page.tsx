@@ -4,7 +4,7 @@ import { Forbidden } from "@/components/forbidden";
 import { requireSession } from "@/lib/auth/session";
 import { resolverSettings } from "@/lib/config/settings";
 import { prisma } from "@/lib/prisma";
-import { RESULTS_BY_TYPE } from "@/lib/tasks/action-config";
+import { MANUAL_ACTION_TYPES, RESULTS_BY_TYPE } from "@/lib/tasks/action-config";
 
 import { TipificacionesForm } from "./tipificaciones-form";
 
@@ -35,9 +35,13 @@ export default async function TipificacionesPage() {
     <TipificacionesForm
       config={tipificaciones}
       // Qué resultados admite cada tipo como máximo. La organización elige un
-      // subconjunto; no puede inventar combinaciones que no tienen sentido, como
-      // "ocupado" en un email.
+      // subconjunto y puede sumarle los propios, pero no puede inventar
+      // combinaciones que no tienen sentido, como "ocupado" en un email.
       permitidos={RESULTS_BY_TYPE}
+      // De qué tipos puede heredar una tipificación propia: solo de los que carga
+      // una persona. Heredar de "Llamada IA" o de "Compromiso" dejaría al operador
+      // cargando a mano algo que el producto genera por su cuenta.
+      basesManuales={MANUAL_ACTION_TYPES}
     />
   );
 }

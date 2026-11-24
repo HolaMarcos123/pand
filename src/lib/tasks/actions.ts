@@ -13,7 +13,11 @@ import { PAYMENT_METHOD_VALUES } from "@/lib/import/payment-config";
 import { allocateToInvoices, refreshClientBalance } from "@/lib/payments/apply";
 import { prisma } from "@/lib/prisma";
 import { getClientDetail } from "@/lib/queries/tasks";
-import { resultadosDe } from "@/lib/config/settings";
+import {
+  resultadoDe,
+  tipoDe,
+  type ResultadoConfig,
+} from "@/lib/config/settings";
 
 export type TaskActionResult = { ok: true } | { ok: false; error: string };
 
@@ -43,27 +47,16 @@ export async function loadClientDetail(clientId: string) {
 
 const managementSchema = z.object({
   clientId: idSchema,
-  actionType: z.enum([
-    "CALL",
-    "EMAIL",
-    "WHATSAPP",
-    "VISIT",
-    "SMS",
-    "NOTE",
-    "PROMISE",
-    "AI_CALL",
-  ]),
-  result: z
-    .enum([
-      "NO_ANSWER",
-      "BUSY",
-      "PROMISE_PAY",
-      "REFUSED",
-      "PAID",
-      "CALLBACK",
-      "WRONG_NUMBER",
-    ])
-    .nullish(),
+  /**
+   * Códigos de tipificación, no los enums.
+   *
+   * Puede llegar "CALL" —una de fábrica— o "carta_documento" —una que creó la
+   * organización—. El enum que se guarda en la base se resuelve acá contra la
+   * configuración, así que un código inventado no entra: no hay un `z.enum` que
+   * lo valide porque la lista depende de la organización.
+   */
+  actionType: z.string().trim().min(1).max(40),
+  result: z.string().trim().min(1).max(40).nullish(),
   comment: z.string().trim().max(2000).nullish(),
   nextActionAt: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   promiseAmount: z.number().positive().max(1e15).nullish(),
@@ -87,18 +80,37 @@ export async function saveManagementAction(
 
   const data = parsed.data;
 
-  // El resultado tiene que ser uno de los válidos para ese tipo. Sin esto, un POST
-  // armado a mano podría dejar "Ocupado" en un email y ensuciar los reportes de
-  // efectividad por canal.
-  // Contra la configuración de la organización, no contra el catálogo completo:
-  // si el administrador apagó un resultado, una pestaña vieja no puede seguir
-  // cargándolo.
-  const allowed = resultadosDe(session.organization.tipificaciones, data.actionType);
-  if (data.result && !allowed.includes(data.result)) {
-    return { ok: false, error: "Ese resultado no corresponde al tipo de gestión." };
+  // El tipo y el resultado se validan contra la configuración de la organización
+  // y no contra el catálogo completo del producto. Es lo que impide que una
+  // pestaña abierta desde antes de un cambio de configuración siga cargando una
+  // tipificación que el administrador apagó o borró —y, de paso, que un POST
+  // armado a mano deje "Ocupado" en un email y ensucie el reporte de efectividad
+  // por canal.
+  const tipificaciones = session.organization.tipificaciones;
+
+  const tipo = tipoDe(tipificaciones, data.actionType);
+  if (!tipo || !tipo.manual || !tipo.activo) {
+    return { ok: false, error: "Ese tipo de gestión no está disponible." };
   }
 
-  if (data.result === "PROMISE_PAY" && (!data.promiseAmount || !data.promiseDate)) {
+  let resultado: ResultadoConfig | null = null;
+  if (data.result) {
+    if (!tipo.resultados.includes(data.result)) {
+      return { ok: false, error: "Ese resultado no corresponde al tipo de gestión." };
+    }
+    resultado = resultadoDe(tipificaciones, data.result) ?? null;
+    if (!resultado) {
+      return { ok: false, error: "Ese resultado no existe en tu configuración." };
+    }
+  }
+
+  // Por el significado heredado y no por el código: si la organización llama
+  // "Acordó refinanciar" a un resultado que cuenta como promesa, también necesita
+  // monto y fecha. Si no, el reporte de cumplimiento tendría promesas sin nada que
+  // cumplir.
+  const esPromesa = resultado?.base === "PROMISE_PAY";
+
+  if (esPromesa && (!data.promiseAmount || !data.promiseDate)) {
     return {
       ok: false,
       error: "Una promesa necesita monto y fecha: sin eso no se puede hacer seguimiento.",
@@ -123,8 +135,13 @@ export async function saveManagementAction(
         organizationId: session.organization.id,
         clientId: client.id,
         operatorId: session.user.id,
-        actionType: data.actionType,
-        result: data.result ?? null,
+        // El enum lleva el significado —de ahí salen todos los reportes— y la
+        // columna *_code, el nombre que eligió la organización. Las de fábrica no
+        // guardan código: su enum ya es su código y repetirlo sería redundante.
+        actionType: tipo.base,
+        typeCode: tipo.propia ? tipo.tipo : null,
+        result: resultado?.base ?? null,
+        resultCode: resultado?.propia ? resultado.codigo : null,
         comment: data.comment ?? null,
         nextActionAt: data.nextActionAt
           ? new Date(`${data.nextActionAt}T09:00:00Z`)
@@ -136,7 +153,7 @@ export async function saveManagementAction(
 
     // Una promesa cambia el estado del deudor; el resto de los resultados no, porque
     // "no atiende" no dice nada nuevo sobre su situación.
-    if (data.result === "PROMISE_PAY" && client.status !== "PROMISE") {
+    if (esPromesa && client.status !== "PROMISE") {
       await tx.client.update({
         where: { id: client.id },
         data: { status: "PROMISE" },

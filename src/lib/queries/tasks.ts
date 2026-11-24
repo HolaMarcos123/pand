@@ -86,7 +86,10 @@ export async function getTasks(
            c.status,
            COALESCE(mora.dias, 0) AS "daysOverdue",
            to_char(ultima.created_at, 'YYYY-MM-DD') AS "lastContactAt",
-           ultima.action_type::text AS "lastActionType",
+           -- El código de la tipificación si la organización usó una propia, y si
+           -- no el enum de fábrica —que es su propio código—. Sin el COALESCE, una
+           -- gestión cargada como "Carta documento" se leía "Email" en la bandeja.
+           COALESCE(ultima.type_code, ultima.action_type::text) AS "lastActionType",
            u.full_name AS "assignedToName"
       FROM clients c
       LEFT JOIN users u ON u.id = c.assigned_to
@@ -126,7 +129,7 @@ export async function getTasks(
            AND i.status IN ('PENDING', 'PARTIAL')
       ) mora ON true
       LEFT JOIN LATERAL (
-        SELECT ma.created_at, ma.action_type
+        SELECT ma.created_at, ma.action_type, ma.type_code
           FROM management_actions ma
          WHERE ma.client_id = c.id
          ORDER BY ma.created_at DESC
@@ -308,7 +311,9 @@ export async function getClientDetail(
         select: {
           id: true,
           actionType: true,
+          typeCode: true,
           result: true,
+          resultCode: true,
           comment: true,
           createdAt: true,
           promiseAmount: true,
@@ -400,8 +405,11 @@ export async function getClientDetail(
     })),
     history: client.managementActions.map((action) => ({
       id: action.id,
-      actionType: action.actionType,
-      result: action.result,
+      // Lo que se muestra es la tipificación que se eligió al cargar la gestión.
+      // El enum queda detrás, para los reportes: ver la migración
+      // 20261123100000_tipificaciones_propias.
+      actionType: action.typeCode ?? action.actionType,
+      result: action.resultCode ?? action.result,
       comment: action.comment,
       operatorName: action.operator?.fullName ?? null,
       createdAt: action.createdAt.toISOString(),
