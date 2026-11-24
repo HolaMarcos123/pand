@@ -3,7 +3,6 @@ import {
   Bot,
   LayoutDashboard,
   ListChecks,
-  Settings,
   UsersRound,
   Wallet,
   type LucideIcon,
@@ -44,7 +43,6 @@ const NAV_BY_ROLE: Record<Role, NavItem[]> = {
     { href: "/tasks", label: "Tareas", icon: ListChecks, showTaskBadge: true },
     { href: "/reports", label: "Reportes", icon: BarChart3 },
     { href: "/ai-agent", label: "IA", icon: Bot, comingSoon: true },
-    { href: "/admin/settings", label: "Config", icon: Settings },
   ],
   SUPERVISOR: [
     { href: "/overview", label: "Overview", icon: LayoutDashboard },
@@ -63,11 +61,32 @@ export function navFor(role: Role): NavItem[] {
   return NAV_BY_ROLE[role];
 }
 
+/**
+ * Rutas que tienen título pero no entrada de menú.
+ *
+ * Configuración se abre desde el menú de la cuenta, abajo a la izquierda, y no
+ * desde la navegación: es "de mi cuenta", no una pantalla más de la operación.
+ * Pero el header igual tiene que decir dónde está parado quien la abre, así que
+ * el título vive acá.
+ *
+ * El orden importa: se busca la primera coincidencia, así que lo más específico
+ * va primero.
+ */
+const TITULOS_FUERA_DEL_MENU: { href: string; label: string }[] = [
+  { href: "/admin/settings", label: "Configuración" },
+  { href: "/backoffice", label: "Backoffice" },
+  { href: "/onboarding", label: "Onboarding" },
+];
+
 /** Título que muestra el header, resuelto desde la ruta activa. */
 export function titleForPath(pathname: string): string {
-  const match = Object.values(NAV_BY_ROLE)
-    .flat()
-    .find((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
+  const coincide = (href: string) =>
+    pathname === href || pathname.startsWith(`${href}/`);
 
-  return match?.label ?? "Pand";
+  const enElMenu = Object.values(NAV_BY_ROLE)
+    .flat()
+    .find((item) => coincide(item.href));
+  if (enElMenu) return enElMenu.label;
+
+  return TITULOS_FUERA_DEL_MENU.find((ruta) => coincide(ruta.href))?.label ?? "Pand";
 }
