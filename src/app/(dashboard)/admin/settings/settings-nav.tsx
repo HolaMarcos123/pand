@@ -104,7 +104,7 @@ export function SettingsNav() {
                 className={cn(
                   "flex gap-3 rounded-card px-3 py-2.5 text-sm transition-colors",
                   activa
-                    ? "bg-white shadow-card"
+                    ? "bg-white shadow-panel"
                     : "hover:bg-white/60",
                 )}
               >

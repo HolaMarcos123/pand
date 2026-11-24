@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { VisualCard } from "@/components/dashboard/chart-primitives";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { TrancheChart } from "@/components/dashboard/tranche-chart";
 import {
@@ -63,14 +64,13 @@ export default async function OverviewPage() {
         />
       </section>
 
-      {/* Fila 3 — operadores del mes */}
-      <section className="rounded-card bg-white shadow-card">
-        <div className="border-b border-pand-border px-5 py-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
-            Operadores del mes
-          </p>
-        </div>
-
+      {/* Fila 3 — operadores del mes. Va en el mismo marco que el gráfico: en un
+          panel, una tabla es un visual más y tiene que encabezarse igual. */}
+      <VisualCard
+        titulo="Operadores del mes"
+        subtitulo="Gestiones y recupero del período en curso"
+        bodyClassName="px-0 pb-0"
+      >
         {operators.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-pand-gris">
             Todavía no hay operadores activos en la organización.
@@ -122,7 +122,7 @@ export default async function OverviewPage() {
             </Table>
           </div>
         )}
-      </section>
+      </VisualCard>
     </div>
   );
 }

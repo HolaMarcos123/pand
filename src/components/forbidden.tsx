@@ -9,7 +9,7 @@ export function Forbidden({
   reason?: string;
 }) {
   return (
-    <div className="mx-auto max-w-md rounded-card border border-pand-border bg-white p-8 text-center shadow-card">
+    <div className="mx-auto max-w-md rounded-card border border-pand-border bg-white p-8 text-center shadow-panel">
       <ShieldAlert className="mx-auto h-10 w-10 text-pand-coral" />
       <p className="mono mt-4 text-sm text-pand-gris">403</p>
       <h2 className="mt-1 text-xl font-bold">No tenés acceso a esta sección</h2>

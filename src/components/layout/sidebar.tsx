@@ -327,7 +327,7 @@ export function Sidebar({
           <div
             role="menu"
             className={cn(
-              "absolute bottom-full z-50 mb-2 w-[260px] overflow-hidden rounded-card border border-pand-border bg-white py-1 shadow-card",
+              "absolute bottom-full z-50 mb-2 w-[260px] overflow-hidden rounded-card border border-pand-border bg-white py-1 shadow-panel",
               contraida ? "left-2" : "left-4",
             )}
           >

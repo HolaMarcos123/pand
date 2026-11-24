@@ -76,7 +76,7 @@ export function CamposForm({ campos }: { campos: CampoPropio[] }) {
   const borrados = campos.filter((c) => !filas.some((f) => f.original === c.id));
 
   return (
-    <div className="space-y-6 rounded-card bg-white p-6 shadow-card">
+    <div className="space-y-6 rounded-card bg-white p-6 shadow-panel">
       <div>
         <h2 className="text-xl font-bold">Campos propios</h2>
         <p className="mt-1 max-w-2xl text-sm text-pand-gris">

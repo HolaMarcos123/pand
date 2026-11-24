@@ -124,7 +124,7 @@ export function UsersTable({
   });
 
   return (
-    <div className="overflow-x-auto rounded-card bg-white shadow-card">
+    <div className="overflow-x-auto rounded-card bg-white shadow-panel">
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (

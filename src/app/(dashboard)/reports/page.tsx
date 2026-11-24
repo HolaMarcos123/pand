@@ -103,7 +103,7 @@ export default async function ReportsPage({
   return (
     <div className="space-y-8">
       {/* ── Período ───────────────────────────────────────── */}
-      <section className="rounded-card bg-white p-5 shadow-card">
+      <section className="rounded-card bg-white p-5 shadow-panel">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <form method="get" className="flex flex-wrap items-end gap-3">
             <div className="space-y-1.5">
@@ -181,7 +181,7 @@ export default async function ReportsPage({
           />
         </div>
 
-        <div className="rounded-card bg-white shadow-card">
+        <div className="rounded-card bg-white shadow-panel">
           <div className="border-b border-pand-border px-5 py-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
               Recupero por medio de pago
@@ -244,7 +244,7 @@ export default async function ReportsPage({
           </p>
         </div>
 
-        <div className="rounded-card bg-white shadow-card">
+        <div className="rounded-card bg-white shadow-panel">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -344,7 +344,7 @@ export default async function ReportsPage({
           />
         </div>
 
-        <div className="rounded-card bg-white shadow-card">
+        <div className="rounded-card bg-white shadow-panel">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -387,7 +387,7 @@ export default async function ReportsPage({
         </div>
 
         {/* Top de rotas: la lista de llamadas del supervisor para mañana. */}
-        <div className="rounded-card bg-white shadow-card">
+        <div className="rounded-card bg-white shadow-panel">
           <div className="border-b border-pand-border px-5 py-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-pand-gris">
               Promesas incumplidas, por lo que falta entrar

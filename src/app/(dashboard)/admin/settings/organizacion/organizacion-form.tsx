@@ -60,7 +60,7 @@ export function OrganizacionForm(props: {
         </p>
       </header>
 
-      <section className="space-y-5 rounded-card bg-white p-5 shadow-card">
+      <section className="space-y-5 rounded-card bg-white p-5 shadow-panel">
         <div className="grid gap-5 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="org-name">Nombre</Label>

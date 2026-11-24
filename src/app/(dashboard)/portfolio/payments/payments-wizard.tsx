@@ -162,7 +162,7 @@ export function PaymentsWizard({ currency }: { currency: string }) {
   if (result) {
     return (
       <div className="mx-auto max-w-3xl space-y-6">
-        <section className="space-y-5 rounded-card bg-white p-6 shadow-card">
+        <section className="space-y-5 rounded-card bg-white p-6 shadow-panel">
           <div className="flex items-start gap-3">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-pand-celeste">
               <Check className="h-5 w-5 text-pand-contorno" />
@@ -218,7 +218,7 @@ export function PaymentsWizard({ currency }: { currency: string }) {
       <Stepper current={step} />
 
       {step === 0 && (
-        <section className="space-y-5 rounded-card bg-white p-6 shadow-card">
+        <section className="space-y-5 rounded-card bg-white p-6 shadow-panel">
           <div>
             <h2 className="text-xl font-bold">Subí la planilla de cobros</h2>
             <p className="mt-1 text-sm text-pand-gris">
@@ -290,7 +290,7 @@ export function PaymentsWizard({ currency }: { currency: string }) {
       )}
 
       {step === 1 && sheet && (
-        <section className="space-y-5 rounded-card bg-white p-6 shadow-card">
+        <section className="space-y-5 rounded-card bg-white p-6 shadow-panel">
           <div>
             <h2 className="text-xl font-bold">Emparejá las columnas</h2>
             <p className="mt-1 text-sm text-pand-gris">
@@ -383,7 +383,7 @@ export function PaymentsWizard({ currency }: { currency: string }) {
       )}
 
       {step === 2 && validation && (
-        <section className="space-y-5 rounded-card bg-white p-6 shadow-card">
+        <section className="space-y-5 rounded-card bg-white p-6 shadow-panel">
           <div>
             <h2 className="text-xl font-bold">Confirmá los cobros</h2>
             <p className="mt-1 text-sm text-pand-gris">

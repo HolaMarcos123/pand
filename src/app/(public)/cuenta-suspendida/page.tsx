@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 export default function CuentaSuspendidaPage() {
   return (
     <main className="flex min-h-screen items-center justify-center bg-pand-bg px-6">
-      <div className="w-full max-w-md rounded-card bg-white p-8 text-center shadow-card">
+      <div className="w-full max-w-md rounded-card bg-white p-8 text-center shadow-panel">
         <PauseCircle className="mx-auto h-10 w-10 text-pand-coral" />
 
         <h1 className="mt-4 text-xl font-bold">Tu cuenta está suspendida</h1>

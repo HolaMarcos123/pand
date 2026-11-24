@@ -1,10 +1,10 @@
-/* Google Fonts: Manrope (500,600,700,800) + JetBrains Mono (400,500).
-   El @import debe ir primero: es un requisito de la spec de CSS. */
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap");
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Las fuentes las carga `next/font` en src/app/layout.tsx y llegan acá como
+   --font-sans y --font-mono. Acá no va ningún @import: bloquea el renderizado
+   hasta que contesta un dominio de terceros. */
 
 @layer base {
   :root {
@@ -48,12 +48,27 @@
     --input: 218 19% 92%;
     --ring: 215 100% 50%;
 
-    /* Series de graficos (recharts) */
-    --chart-1: 215 100% 50%; /* azul    */
-    --chart-2: 194 100% 74%; /* celeste */
-    --chart-3: 355 86% 70%; /* coral   */
-    --chart-4: 240 4% 45%; /* gris    */
-    --chart-5: 215 60% 70%; /* azul suave */
+    /* ── Series de graficos ───────────────────────────────────
+       Paleta categorica al modo Power BI —una serie, un color, y el
+       mismo orden en todos los visuales— pero con los colores de Pand
+       en lugar del azul de Microsoft.
+
+       El orden no es decorativo: 1 es la serie principal, 2 la de
+       comparacion, 3 lo que esta mal (coral) y 4-6 el relleno. Un
+       grafico que usa el 3 para una serie neutra le dice al operador
+       que algo anda mal cuando no anda mal. */
+    --chart-1: 215 100% 50%; /* azul     #006AFF — serie principal */
+    --chart-2: 194 100% 74%; /* celeste  #7BE1FF — comparacion */
+    --chart-3: 355 86% 70%; /* coral    #F4707C — mora, incumplido */
+    --chart-4: 215 70% 32%; /* azul profundo     — cuarta serie */
+    --chart-5: 240 4% 45%; /* gris     #6E6E78 — resto / otros */
+    --chart-6: 194 55% 45%; /* petroleo          — sexta serie */
+
+    /* Gris de los ejes y de la grilla. En Power BI la grilla casi no se
+       ve y los ejes tampoco compiten con los datos: la tinta esta en las
+       barras, no en el marco. */
+    --chart-grid: 218 19% 92%;
+    --chart-axis: 240 4% 55%;
 
     /* Sidebar */
     --sidebar: 0 0% 100%;
@@ -100,8 +115,12 @@
     --chart-1: 215 100% 60%;
     --chart-2: 194 100% 74%;
     --chart-3: 355 86% 70%;
-    --chart-4: 240 5% 65%;
-    --chart-5: 215 60% 70%;
+    --chart-4: 215 70% 50%;
+    --chart-5: 240 5% 65%;
+    --chart-6: 194 55% 60%;
+
+    --chart-grid: 240 8% 24%;
+    --chart-axis: 240 5% 60%;
 
     --sidebar: 240 12% 16%;
     --sidebar-foreground: 216 38% 97%;
@@ -122,19 +141,58 @@
   body {
     background-color: var(--pand-bg);
     color: var(--pand-contorno);
-    font-family: "Manrope", sans-serif;
-    font-weight: 500;
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    /* 400 y no 500: Geist tiene un regular de peso normal. Manrope necesitaba
+       500 porque su 400 se lee demasiado fino, y arrastrar ese peso acá dejaba
+       toda la aplicación en semibold. */
+    font-weight: 400;
+    /* Las cifras alinean en columna en cualquier tabla, sin tener que acordarse
+       de poner la clase. Es lo que hace que un listado de importes se lea. */
+    font-variant-numeric: tabular-nums;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Geist trae ligaduras y una "a" de doble piso en los títulos que a tamaño
+     grande se leen mejor con el tracking un poco cerrado. */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.011em;
   }
 }
 
 @layer utilities {
   /* Cifras: importes, IDs, fechas. Tabular para que las columnas alineen. */
   .mono {
-    font-family: "JetBrains Mono", monospace;
+    font-family: var(--font-mono), ui-monospace, monospace;
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
+  }
+
+  /* Cifra grande de un KPI.
+     En Geist **Sans** con cifras tabulares, no en Geist Mono. Es lo que hace
+     Power BI en su visual de tarjeta, y acá además es obligatorio: Geist Mono es
+     bastante más ancha que JetBrains Mono, y "Gs. 561.617.818" a 30px no entraba
+     en el ancho de la card —se partía en dos líneas después del símbolo—.
+     Tabular alcanza para que tres importes apilados alineen por dígito, que es lo
+     único que la monoespaciada aportaba acá. */
+  .cifra {
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    letter-spacing: -0.02em;
+  }
+
+  /* Etiqueta de sección: el "label" chico en mayúsculas que encabeza cada card
+     y cada visual. Estaba repetido con cuatro clases en veinte archivos. */
+  .etiqueta {
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--pand-gris);
   }
 
   .text-balance {

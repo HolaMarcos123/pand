@@ -421,7 +421,7 @@ export function UploadWizard({
       <Stepper current={step} />
 
       {step === 0 && (
-        <section className="space-y-5 rounded-card bg-white p-6 shadow-card">
+        <section className="space-y-5 rounded-card bg-white p-6 shadow-panel">
           <div>
             <h2 className="text-xl font-bold">Subí el archivo</h2>
             <p className="mt-1 text-sm text-pand-gris">
@@ -524,7 +524,7 @@ export function UploadWizard({
       )}
 
       {step === 1 && sheet && (
-        <section className="space-y-5 rounded-card bg-white p-6 shadow-card">
+        <section className="space-y-5 rounded-card bg-white p-6 shadow-panel">
           <div>
             <h2 className="text-xl font-bold">Elegí qué subir</h2>
             <p className="mt-1 text-sm text-pand-gris">
@@ -833,7 +833,7 @@ export function UploadWizard({
       )}
 
       {step === 2 && validation && (
-        <section className="space-y-5 rounded-card bg-white p-6 shadow-card">
+        <section className="space-y-5 rounded-card bg-white p-6 shadow-panel">
           <div>
             <h2 className="text-xl font-bold">Confirmá la carga</h2>
             <p className="mt-1 text-sm text-pand-gris">

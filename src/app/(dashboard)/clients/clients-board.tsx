@@ -519,7 +519,7 @@ export function ClientsBoard({
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-card bg-white shadow-card">
+        <div className="overflow-x-auto rounded-card bg-white shadow-panel">
           <Table>
             <TableHeader>
               <TableRow>

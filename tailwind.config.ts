@@ -62,6 +62,9 @@ const config: Config = {
           "3": "hsl(var(--chart-3))",
           "4": "hsl(var(--chart-4))",
           "5": "hsl(var(--chart-5))",
+          "6": "hsl(var(--chart-6))",
+          grid: "hsl(var(--chart-grid))",
+          axis: "hsl(var(--chart-axis))",
         },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar))",
@@ -75,13 +78,36 @@ const config: Config = {
         },
       },
       fontFamily: {
-        sans: ["Manrope", "sans-serif"],
-        mono: ["JetBrains Mono", "monospace"],
+        // Las cargan next/font en src/app/layout.tsx. La lista de respaldo es la
+        // del sistema y no "sans-serif" pelado: si la fuente tarda, el texto se
+        // dibuja con la del sistema operativo y no con la serif del navegador.
+        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "ui-monospace", "SFMono-Regular", "monospace"],
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        // `rounded-card` y `rounded-badge` se usan en una veintena de archivos
+        // desde el primer dia, pero nunca estuvieron definidos: Tailwind no
+        // emite nada para una clase que no existe, asi que todas esas cards
+        // venian con las esquinas cuadradas. Lo mismo `shadow-card`.
+        card: "var(--radius)",
+        badge: "9999px",
+      },
+      boxShadow: {
+        // Un hairline + una sombra minima, no una sombra difusa: en un panel de
+        // datos las cards se separan del fondo por el borde, no por la altura.
+        // Es lo que hace Power BI y es lo que mantiene legible una pantalla con
+        // ocho visuales.
+        // "panel" y no "card", que seria el nombre natural: `colors.card` existe
+        // como token semantico de shadcn, y de cada color Tailwind genera tambien
+        // una utilidad de COLOR de sombra. O sea que `shadow-card` ya estaba
+        // tomado —pintaba la sombra de blanco— y ganaba por orden de aparicion.
+        // Esa colision es la razon por la que `shadow-card` nunca se vio.
+        panel: "0 0 0 1px rgba(230, 233, 238, 0.9), 0 1px 2px 0 rgba(42, 42, 53, 0.04)",
+        "panel-hover":
+          "0 0 0 1px rgba(123, 225, 255, 0.9), 0 2px 8px 0 rgba(42, 42, 53, 0.06)",
       },
       keyframes: {
         "accordion-down": {

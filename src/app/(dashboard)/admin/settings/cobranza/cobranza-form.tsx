@@ -98,7 +98,7 @@ export function CobranzaForm({
         </p>
       </header>
 
-      <section className="space-y-5 rounded-card bg-white p-5 shadow-card">
+      <section className="space-y-5 rounded-card bg-white p-5 shadow-panel">
         <div className="space-y-1.5">
           <Label htmlFor="tasa">Interés por mora, mensual</Label>
           <div className="flex items-center gap-2">
@@ -162,7 +162,7 @@ export function CobranzaForm({
           dólares: 4,5 % mensual es corriente en PYG y disparatado en USD. Con
           una sola tasa, la ficha de un deudor con prenda en dólares mostraba un
           interés que el operador no podía decir en voz alta. */}
-      <section className="space-y-4 rounded-card bg-white p-5 shadow-card">
+      <section className="space-y-4 rounded-card bg-white p-5 shadow-panel">
         <div>
           <h3 className="text-sm font-bold">Tasas por moneda</h3>
           <p className="mt-1 text-sm text-pand-gris">
