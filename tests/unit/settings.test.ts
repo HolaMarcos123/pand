@@ -5,6 +5,7 @@ import {
   SETTINGS_POR_DEFECTO,
   baseDeResultado,
   baseDeTipo,
+  tipoDe,
   labelResultado,
   labelTipo,
   resolverSettings,
@@ -309,6 +310,87 @@ describe("tipificaciones propias", () => {
     // Las de fábrica primero: son las que el operador ya conoce.
     expect(opciones[0].propia).toBe(false);
     expect(opciones.at(-1)?.propia).toBe(true);
+  });
+});
+
+/**
+ * Tipificaciones borradas.
+ *
+ * Borrar una tipificación propia no puede significar olvidarla: su código quedó
+ * escrito en cada gestión que la usó, y la ficha del deudor lo lee para decir qué
+ * cargó el operador. Archivada conserva el nombre tal cual se escribió; sin
+ * archivar, el nombre se reconstruye del slug y se pierde todo lo que el slug no
+ * guarda, empezando por los acentos.
+ */
+describe("tipificaciones archivadas", () => {
+  const archivada = () =>
+    resolverTipificaciones({
+      resultadosArchivados: [
+        { id: "acordo_refinanciar", label: "Acordó refinanciar", base: "PROMISE_PAY" },
+      ],
+      tiposArchivados: [
+        { id: "carta_documento", label: "Carta documento", base: "EMAIL" },
+      ],
+    });
+
+  it("conserva el nombre exacto, con acentos", () => {
+    const config = archivada();
+
+    expect(labelResultado(config, "acordo_refinanciar")).toBe("Acordó refinanciar");
+    expect(labelTipo(config, "carta_documento")).toBe("Carta documento");
+  });
+
+  it("sin archivar, el nombre se reconstruye del slug y pierde el acento", () => {
+    // Es el comportamiento anterior y sigue siendo el respaldo: una archivada que
+    // se cayó del tope tiene que leerse, aunque sea peor.
+    const config = resolverTipificaciones(undefined);
+    expect(labelResultado(config, "acordo_refinanciar")).toBe("Acordo refinanciar");
+  });
+
+  it("no se ofrece en ningún lado", () => {
+    const config = archivada();
+
+    expect(resultadosDe(config, "CALL")).not.toContain("acordo_refinanciar");
+    expect(tiposCargables(config).map((t) => t.tipo)).not.toContain("carta_documento");
+    expect(tipoDe(config, "carta_documento")?.activo).toBe(false);
+  });
+
+  it("sigue sabiendo qué significaba", () => {
+    // Lo necesita cualquier pantalla que quiera agrupar el historial por
+    // significado en vez de por nombre.
+    expect(baseDeResultado(archivada(), "acordo_refinanciar")).toBe("PROMISE_PAY");
+  });
+
+  it("una viva con el mismo código le gana a la archivada", () => {
+    // Volver a crear una tipificación con un nombre que ya se usó tiene que
+    // funcionar: la nueva es la que se ofrece y la archivada queda de respaldo.
+    const config = resolverTipificaciones({
+      resultadosPropios: [
+        { id: "acordo_refinanciar", label: "Refinanció", base: "PROMISE_PAY" },
+      ],
+      resultadosArchivados: [
+        { id: "acordo_refinanciar", label: "Acordó refinanciar", base: "PAID" },
+      ],
+    });
+
+    expect(labelResultado(config, "acordo_refinanciar")).toBe("Refinanció");
+    expect(baseDeResultado(config, "acordo_refinanciar")).toBe("PROMISE_PAY");
+    expect(resultadosDe(config, "CALL")).toContain("acordo_refinanciar");
+    expect(
+      config.resultados.filter((r) => r.codigo === "acordo_refinanciar"),
+    ).toHaveLength(1);
+  });
+
+  it("una base que no existe no entra al catálogo", () => {
+    const config = resolverTipificaciones({
+      resultadosArchivados: [
+        { id: "telepatia", label: "Telepatía", base: "NO_EXISTE" },
+      ],
+    });
+
+    expect(config.resultados.some((r) => r.codigo === "telepatia")).toBe(false);
+    // Y sin nada que leer, se cae al nombre reconstruido en vez de romper.
+    expect(labelResultado(config, "telepatia")).toBe("Telepatia");
   });
 });
 

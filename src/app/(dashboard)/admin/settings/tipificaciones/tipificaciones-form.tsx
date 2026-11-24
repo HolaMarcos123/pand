@@ -40,6 +40,8 @@ type EstadoTipo = {
 
 type PropioTipo = EstadoTipo & { id: string; base: ActionType };
 type PropioResultado = { id: string; label: string; base: ActionResult };
+/** Una borrada: solo se guarda cómo se llamaba y qué significaba. */
+type Archivada = { id: string; label: string; base: string };
 
 type Estado = {
   /** Las de fábrica, por su enum. */
@@ -47,13 +49,17 @@ type Estado = {
   etiquetasResultado: Record<string, string>;
   tiposPropios: PropioTipo[];
   resultadosPropios: PropioResultado[];
+  tiposArchivados: Archivada[];
+  resultadosArchivados: Archivada[];
 };
 
 const TIPOS_BASE = Object.keys(ACTION_TYPE_LABELS) as ActionType[];
 const RESULTADOS_BASE = Object.keys(ACTION_RESULT_LABELS) as ActionResult[];
 
 function desdeConfig(config: Tipificaciones): Estado {
-  const propios = config.tipos.filter((t) => t.propia);
+  // Las archivadas no se editan: están en el catálogo solo para que el historial
+  // pueda leerse. Se listan aparte, al pie de la pantalla.
+  const propios = config.tipos.filter((t) => t.propia && !t.archivada);
 
   return {
     tipos: Object.fromEntries(
@@ -75,7 +81,13 @@ function desdeConfig(config: Tipificaciones): Estado {
       resultados: [...t.resultados],
     })),
     resultadosPropios: config.resultados
-      .filter((r) => r.propia)
+      .filter((r) => r.propia && !r.archivada)
+      .map((r) => ({ id: r.codigo, label: r.label, base: r.base })),
+    tiposArchivados: config.tipos
+      .filter((t) => t.archivada)
+      .map((t) => ({ id: t.tipo, label: t.label, base: t.base })),
+    resultadosArchivados: config.resultados
+      .filter((r) => r.archivada)
       .map((r) => ({ id: r.codigo, label: r.label, base: r.base })),
   };
 }
@@ -227,18 +239,51 @@ export function TipificacionesForm({
     });
   }
 
+  /**
+   * Borrar una tipificación propia.
+   *
+   * Si se creó en esta pantalla y todavía no se guardó, se olvida y listo: no
+   * existe ninguna gestión que la use. Si ya estaba guardada, se archiva en vez
+   * de borrarse, porque su código quedó escrito en las gestiones que la usaron y
+   * el historial necesita el nombre para poder mostrarlas.
+   */
   function borrarTipo(id: string) {
+    const eraNueva = nuevas.has(id);
     olvidarNueva(id);
-    setEstado((actual) => ({
-      ...actual,
-      tiposPropios: actual.tiposPropios.filter((t) => t.id !== id),
-    }));
+
+    setEstado((actual) => {
+      const borrado = actual.tiposPropios.find((t) => t.id === id);
+
+      return {
+        ...actual,
+        tiposPropios: actual.tiposPropios.filter((t) => t.id !== id),
+        tiposArchivados:
+          eraNueva || !borrado
+            ? actual.tiposArchivados
+            : [
+                ...actual.tiposArchivados,
+                { id: borrado.id, label: borrado.label.trim(), base: borrado.base },
+              ],
+      };
+    });
   }
 
   function borrarResultado(id: string) {
+    const eraNueva = nuevas.has(id);
     olvidarNueva(id);
-    setEstado((actual) => ({
+
+    setEstado((actual) => {
+      const borrado = actual.resultadosPropios.find((r) => r.id === id);
+
+      return {
       ...actual,
+      resultadosArchivados:
+        eraNueva || !borrado
+          ? actual.resultadosArchivados
+          : [
+              ...actual.resultadosArchivados,
+              { id: borrado.id, label: borrado.label.trim(), base: borrado.base },
+            ],
       resultadosPropios: actual.resultadosPropios.filter((r) => r.id !== id),
       // Y se saca de todos los tipos que lo ofrecían: dejarlo tildado guardaría
       // un código que ya no existe y el servidor lo descartaría en silencio.
@@ -252,7 +297,8 @@ export function TipificacionesForm({
         ...t,
         resultados: t.resultados.filter((r) => r !== id),
       })),
-    }));
+      };
+    });
   }
 
   function restaurar() {
@@ -268,10 +314,24 @@ export function TipificacionesForm({
         ]),
       ),
       etiquetasResultado: { ...ACTION_RESULT_LABELS },
-      // Volver a fábrica borra lo propio: es lo que significa "de fábrica". El
-      // botón pide confirmación justamente por esto.
+      // Volver a fábrica saca lo propio de circulación: es lo que significa "de
+      // fábrica". El botón pide confirmación justamente por esto.
       tiposPropios: [],
       resultadosPropios: [],
+      // Pero se archiva, igual que al borrar una sola: las gestiones que las
+      // usaron siguen existiendo y el historial tiene que poder leerlas.
+      tiposArchivados: [
+        ...estado.tiposArchivados,
+        ...estado.tiposPropios
+          .filter((t) => !nuevas.has(t.id))
+          .map((t) => ({ id: t.id, label: t.label.trim(), base: t.base })),
+      ],
+      resultadosArchivados: [
+        ...estado.resultadosArchivados,
+        ...estado.resultadosPropios
+          .filter((r) => !nuevas.has(r.id))
+          .map((r) => ({ id: r.id, label: r.label.trim(), base: r.base })),
+      ],
     });
     setNuevas(new Set());
   }
@@ -325,6 +385,8 @@ export function TipificacionesForm({
 
     return {
       etiquetasResultado: estado.etiquetasResultado,
+      tiposArchivados: estado.tiposArchivados,
+      resultadosArchivados: estado.resultadosArchivados,
       resultadosPropios,
       tipos: Object.fromEntries(
         Object.entries(estado.tipos).map(([tipo, valor]) => [
@@ -373,6 +435,10 @@ export function TipificacionesForm({
             label: r.label.trim(),
             base: r.base,
           })),
+          // Las más nuevas primero: si alguna vez se pasa el tope, lo que se
+          // olvida es lo más viejo, que es lo que menos gestiones tiene detrás.
+          tiposArchivados: [...estadoAGuardar.tiposArchivados].reverse(),
+          resultadosArchivados: [...estadoAGuardar.resultadosArchivados].reverse(),
         },
       });
 
@@ -547,7 +613,7 @@ export function TipificacionesForm({
               <p className="mt-2 text-xs text-pand-gris">
                 Las gestiones ya cargadas con un resultado que borres siguen
                 contándose por lo que significaba, y en la ficha del deudor se
-                muestran con el nombre que tenía.
+                siguen mostrando con el nombre que tenía.
               </p>
             </div>
           )}
@@ -731,6 +797,35 @@ export function TipificacionesForm({
           );
         })}
       </section>
+
+      {(estado.tiposArchivados.length > 0 ||
+        estado.resultadosArchivados.length > 0) && (
+        <section className="rounded-card border border-pand-border bg-pand-bg p-5">
+          <p className="etiqueta">Borradas</p>
+          <p className="mt-2 text-sm text-pand-gris">
+            Ya no se ofrecen al cargar una gestión, pero se guarda cómo se
+            llamaban para que el historial de los deudores siga siendo legible.
+          </p>
+
+          <ul className="mt-3 flex flex-wrap gap-2">
+            {[...estado.tiposArchivados, ...estado.resultadosArchivados].map(
+              (archivada) => (
+                <li
+                  key={archivada.id}
+                  className="rounded-badge border border-dashed border-pand-border px-3 py-1 text-xs text-pand-gris"
+                >
+                  {archivada.label}
+                </li>
+              ),
+            )}
+          </ul>
+
+          <p className="mt-3 text-xs text-pand-gris">
+            Podés volver a crear una con el mismo nombre cuando quieras: la nueva
+            manda, y esta queda solo para leer lo viejo.
+          </p>
+        </section>
+      )}
 
       {delSistema.length > 0 && (
         <section className="rounded-card border border-pand-border bg-pand-bg p-5">

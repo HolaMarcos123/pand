@@ -151,7 +151,7 @@ export async function saveTipificaciones(
   };
 
   const tipoRepetido = duplicado(
-    resuelta.tipos.filter((t) => t.activo).map((t) => t.label),
+    resuelta.tipos.filter((t) => t.activo && !t.archivada).map((t) => t.label),
   );
   if (tipoRepetido) {
     return {
@@ -160,7 +160,13 @@ export async function saveTipificaciones(
     };
   }
 
-  const resultadoRepetido = duplicado(resuelta.resultados.map((r) => r.label));
+  // Sin las archivadas: esas ya no se ofrecen en ningún lado, así que no hay
+  // dónde confundirlas. Contarlas impediría volver a crear una tipificación con
+  // un nombre que se usó alguna vez, que es justo lo contrario de lo que la
+  // pantalla promete.
+  const resultadoRepetido = duplicado(
+    resuelta.resultados.filter((r) => !r.archivada).map((r) => r.label),
+  );
   if (resultadoRepetido) {
     return {
       ok: false,

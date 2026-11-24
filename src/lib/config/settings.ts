@@ -72,6 +72,17 @@ export const MAX_TIPOS_PROPIOS = 10;
 export const MAX_RESULTADOS_PROPIOS = 20;
 
 /**
+ * Cuántas borradas se recuerdan, por tipo y por resultado.
+ *
+ * Tiene tope porque la lista solo crece: alguien que prueba nombres durante una
+ * semana no puede dejar la columna `settings` llena de basura para siempre.
+ * Pasado el tope se olvidan las más viejas, y esas gestiones vuelven a leerse
+ * con el nombre reconstruido del slug, que es lo que pasaba antes: se pierde el
+ * acento, no el dato.
+ */
+export const MAX_ARCHIVADAS = 50;
+
+/**
  * El código de una tipificación.
  *
  * Las de fábrica usan el nombre del enum (`CALL`, `PROMISE_PAY`) y las propias un
@@ -108,6 +119,13 @@ export type TipoConfig = {
   manual: boolean;
   /** La creó la organización: se puede borrar. Las de fábrica solo se apagan. */
   propia: boolean;
+  /**
+   * La organización la borró. Sigue en el catálogo, pero no se ofrece.
+   *
+   * Existe para el historial: una gestión de hace tres meses apunta a ella, y
+   * tiene que poder seguir mostrándose con el nombre que tenía escrito.
+   */
+  archivada: boolean;
 };
 
 export type ResultadoConfig = {
@@ -115,6 +133,8 @@ export type ResultadoConfig = {
   base: ActionResult;
   label: string;
   propia: boolean;
+  /** Borrada por la organización: se conserva para poder leer el historial. */
+  archivada: boolean;
 };
 
 export type Tipificaciones = {
@@ -150,6 +170,26 @@ const resultadoPropioSchema = z.object({
 });
 
 /**
+ * Una tipificación borrada, con el nombre que tenía.
+ *
+ * Al borrarla no alcanza con olvidarla: su código quedó escrito en cada gestión
+ * que la usó, y el historial lo lee para decir qué cargó el operador. Sin esto el
+ * nombre se reconstruye del slug y se pierde todo lo que el slug no puede
+ * guardar —los acentos, las mayúsculas, la puntuación—: "Acordó refinanciar"
+ * volvía como "Acordo refinanciar".
+ *
+ * No lleva `resultados` ni `activo`: una archivada no se ofrece nunca, así que lo
+ * único que hace falta conservar es cómo se llamaba y qué significaba.
+ */
+const archivadaSchema = z.object({
+  id: slugSchema,
+  label: etiquetaSchema,
+  base: z.string().trim().min(1).max(40),
+});
+
+export type Archivada = z.infer<typeof archivadaSchema>;
+
+/**
  * Un array que descarta los elementos que no entiende, en vez de invalidarse entero.
  *
  * Sin esto, UNA tipificación propia corrupta en el JSON —de una versión anterior,
@@ -183,6 +223,8 @@ const tipificacionesGuardadasSchema = z.object({
     resultadoPropioSchema,
     MAX_RESULTADOS_PROPIOS,
   ).optional(),
+  tiposArchivados: arrayTolerante(archivadaSchema, MAX_ARCHIVADAS).optional(),
+  resultadosArchivados: arrayTolerante(archivadaSchema, MAX_ARCHIVADAS).optional(),
 });
 
 export type TipificacionesGuardadas = z.infer<typeof tipificacionesGuardadasSchema>;
@@ -364,6 +406,7 @@ export function resolverTipificaciones(
     base: r,
     label: guardadas?.etiquetasResultado?.[r] ?? ACTION_RESULT_LABELS[r],
     propia: false,
+    archivada: false,
   }));
 
   const propios: ResultadoConfig[] = (guardadas?.resultadosPropios ?? [])
@@ -375,9 +418,25 @@ export function resolverTipificaciones(
       base: r.base as ActionResult,
       label: r.label,
       propia: true,
+      archivada: false,
     }));
 
-  const resultados = [...deFabrica, ...propios];
+  // Las borradas van al final y nunca se ofrecen. Si la organización volvió a
+  // crear una con el mismo código, gana la viva: la archivada quedó para leer
+  // gestiones viejas, no para competir con lo que existe hoy.
+  const vivos = new Set([...deFabrica, ...propios].map((r) => r.codigo));
+  const archivados: ResultadoConfig[] = (guardadas?.resultadosArchivados ?? [])
+    .filter((r, i, todos) => todos.findIndex((otro) => otro.id === r.id) === i)
+    .filter((r) => !vivos.has(r.id) && esResultadoDeFabrica(r.base))
+    .map((r) => ({
+      codigo: r.id,
+      base: r.base as ActionResult,
+      label: r.label,
+      propia: true,
+      archivada: true,
+    }));
+
+  const resultados = [...deFabrica, ...propios, ...archivados];
 
   /**
    * Los resultados que un tipo admite: los de fábrica que ya admitía, más los
@@ -389,7 +448,7 @@ export function resolverTipificaciones(
   const admitidosPor = (base: ActionType): string[] => {
     const permitidos = RESULTS_BY_TYPE[base];
     return resultados
-      .filter((r) => permitidos.includes(r.base))
+      .filter((r) => !r.archivada && permitidos.includes(r.base))
       .map((r) => r.codigo);
   };
 
@@ -411,6 +470,7 @@ export function resolverTipificaciones(
       resultados: suyos,
       manual: MANUAL_ACTION_TYPES.includes(tipo),
       propia: false,
+      archivada: false,
     };
   });
 
@@ -431,10 +491,41 @@ export function resolverTipificaciones(
         // persona, así que no hay forma de crear una propia que genere el sistema.
         manual: true,
         propia: true,
+        archivada: false,
       };
     });
 
-  return { tipos: [...tiposDeFabrica, ...tiposPropios], resultados };
+  // ── Los tipos que la organización borró ──────────────────────────────
+  const tiposVivos = new Set([...tiposDeFabrica, ...tiposPropios].map((t) => t.tipo));
+  const tiposArchivados = (guardadas?.tiposArchivados ?? [])
+    .filter((t, i, todos) => todos.findIndex((otro) => otro.id === t.id) === i)
+    .filter((t) => !tiposVivos.has(t.id) && esTipoDeFabrica(t.base))
+    .map((t): TipoConfig => ({
+      tipo: t.id,
+      base: t.base as ActionType,
+      label: t.label,
+      // Apagada y sin resultados: no se ofrece ni se puede cargar. Está acá nada
+      // más que para que `labelTipo` sepa cómo se llamaba.
+      activo: false,
+      resultados: [],
+      manual: true,
+      propia: true,
+      archivada: true,
+    }));
+
+  return {
+    tipos: [...tiposDeFabrica, ...tiposPropios, ...tiposArchivados],
+    resultados,
+  };
+}
+
+/** La base guardada de una archivada llega como string: puede ser de otra versión. */
+function esResultadoDeFabrica(base: string): base is ActionResult {
+  return (TODOS_LOS_RESULTADOS as string[]).includes(base);
+}
+
+function esTipoDeFabrica(base: string): base is ActionType {
+  return (TODOS_LOS_TIPOS as string[]).includes(base);
 }
 
 // ───────────────────────── Ayudantes de lectura ─────────────────────────
