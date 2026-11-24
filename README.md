@@ -6,7 +6,7 @@ Software de cobranzas SaaS multi-tenant.
 
 | Capa        | Herramienta                                   |
 | ----------- | --------------------------------------------- |
-| Framework   | Next.js 14 (App Router, TypeScript, `src/`)   |
+| Framework   | Next.js 16 (App Router, TypeScript, `src/`)   |
 | UI          | Tailwind CSS v3 + shadcn/ui                   |
 | Datos       | Supabase + Prisma 7 (PostgreSQL)              |
 | IA          | Anthropic SDK                                 |
@@ -309,9 +309,45 @@ y como variables CSS en `src/app/globals.css`.
 | `pand-bg`        | `#F6F8FB` | fondo de la app                     |
 | `pand-border`    | `#E6E9EE` | bordes y separadores                |
 
-Tipografías: **Manrope** (500–800) para texto, **JetBrains Mono** (400, 500)
-para cifras. Aplicá `.mono` a importes, IDs y fechas — incluye `tabular-nums`
-para que las columnas numéricas alineen.
+Tipografías: **Geist** para texto y **Geist Mono** para cifras, las dos variables
+y cargadas con `next/font` en `src/app/layout.tsx` — no con un `@import`, que
+bloquea el renderizado esperando a un dominio de terceros. Llegan al CSS como
+`--font-sans` y `--font-mono`.
+
+- `.mono` para importes, IDs y fechas dentro de una tabla.
+- `.cifra` para la cifra grande de un KPI. Va en **sans** con `tabular-nums`, no
+  en monoespaciada: Geist Mono es más ancha que JetBrains Mono y un importe en
+  guaraníes no entra en el ancho de una card.
+- `.etiqueta` para el label chico en mayúsculas que encabeza cada card.
+
+Ojo con dos nombres que parecen libres y no lo están:
+
+- `shadow-panel`, no `shadow-card`. De cada color Tailwind genera también una
+  utilidad de **color de sombra**, y como existe el token `colors.card`,
+  `shadow-card` ya estaba tomado: pintaba la sombra de blanco y ganaba por orden
+  de aparición. Por eso durante meses ninguna card tuvo sombra.
+- `rounded-card` y `rounded-badge` sí existen, pero hay que declararlos en
+  `tailwind.config.ts`. Tailwind no emite nada para una clase que no está
+  definida, así que una clase inventada se ve exactamente igual que una que
+  funciona: no da error, simplemente no hace nada.
+
+### Gráficos
+
+Las convenciones viven en `src/components/dashboard/chart-primitives.tsx` y están
+tomadas de cómo arma los visuales Power BI, que es donde el equipo de cobranzas ya
+lee sus números: título arriba a la izquierda, grilla solo horizontal, ejes sin
+línea ni marcas, etiqueta de dato sobre cada barra y cards planas separadas por un
+hairline. Un visual nuevo las hereda usando `VisualCard`, `EJE_CATEGORIA`,
+`EJE_VALOR`, `GRILLA` y `TooltipVisual` en vez de volver a decidirlas.
+
+Los colores de las series van en **hexadecimal** y no como `hsl(var(--chart-1))`:
+recharts los escribe como atributos de presentación del SVG, donde `var()` no se
+resuelve y el elemento queda sin pintar. Son los mismos valores que los tokens
+`--chart-*` de `globals.css` y tienen que moverse juntos.
+
+Una escala ordenada —los tramos de mora— se pinta con una rampa de un solo tono
+que se oscurece, no con un color por categoría: así la forma del gráfico dice que
+esto empeora sin que haya que leer el eje.
 
 Los tokens semánticos de shadcn/ui (`primary`, `destructive`, `muted`…) están
 mapeados a esta paleta, así que los componentes salen con la marca puesta sin
